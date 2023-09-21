@@ -1,0 +1,4 @@
+/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/pico_side/build/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/foo.dir
+/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/pico_side/build/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/boo.dir
+/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/pico_side/build/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/edit_cache.dir
+/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/pico_side/build/CMakeFiles/_CMakeLTOTest-C/bin/CMakeFiles/rebuild_cache.dir

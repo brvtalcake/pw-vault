@@ -1,0 +1,10 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/pico_side/build/CMakeFiles/_CMakeLTOTest-CXX/src/main.cpp
+
