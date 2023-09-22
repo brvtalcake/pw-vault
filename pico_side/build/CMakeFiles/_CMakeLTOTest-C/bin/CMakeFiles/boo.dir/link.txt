@@ -1,1 +1,0 @@
-/usr/bin/arm-none-eabi-gcc -mcpu=cortex-m0plus -mthumb -flto=auto -fno-fat-lto-objects -Wl,--build-id=none -nostdlib CMakeFiles/boo.dir/main.c.obj -o boo  libfoo.a 

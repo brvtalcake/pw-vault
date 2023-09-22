@@ -639,10 +639,12 @@ bool        picoutil_aes_error(void);
 aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, aes_key_t key);
 aes_block_t __time_critical_func(picoutil_aes_encrypt_block_until)(aes_block_t block, aes_key_t key, size_t num_round);
 
+#if 0
 void        picoutil_test_key_schedule(void);
 void        picoutil_test_sub_bytes(void);
 void        picoutil_test_shift_rows(void);
 void        picoutil_test_mix_columns(void);
+#endif
 void        picoutil_test_encryption_ecb_mode(size_t num_rounds);
 
 END_DECLS

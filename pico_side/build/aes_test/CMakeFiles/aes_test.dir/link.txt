@@ -1,2 +1,0 @@
-"/usr/bin/arm-none-eabi-gcc-ar" cr libaes_test.a CMakeFiles/aes_test.dir/aes.c.obj
-"/usr/bin/arm-none-eabi-gcc-ranlib" libaes_test.a

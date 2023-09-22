@@ -215,8 +215,8 @@ int main(void)
         // picoutil_test_key_schedule();
         // picoutil_test_sub_bytes();
         // picoutil_test_shift_rows();
-        //picoutil_test_mix_columns();
-        picoutil_test_encryption_ecb_mode(0);
+        // picoutil_test_mix_columns();
+        picoutil_test_encryption_ecb_mode(13);
 #endif
     }
 reset:

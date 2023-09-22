@@ -7,6 +7,64 @@ static bool aes_error = false;
 
 #include <string.h>
 
+#ifdef GET_ROW
+    #undef GET_ROW
+#endif
+#define GET_ROW(BLOCK, ROW, OUTPUT)                                 \
+    byte_t OUTPUT[sizeof(aes_word_t)] = { 0 };                      \
+    __extension__                                                   \
+    ({                                                              \
+        byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
+        temp[0] = ((byte_t*)&((BLOCK).block[0]))[(ROW)];            \
+        temp[1] = ((byte_t*)&((BLOCK).block[1]))[(ROW)];            \
+        temp[2] = ((byte_t*)&((BLOCK).block[2]))[(ROW)];            \
+        temp[3] = ((byte_t*)&((BLOCK).block[3]))[(ROW)];            \
+        memcpy((OUTPUT), temp, sizeof(aes_word_t));                 \
+    })
+
+#ifdef SET_ROW
+    #undef SET_ROW
+#endif
+#define SET_ROW(BLOCK, ROW, INPUT)                                  \
+    __extension__                                                   \
+    ({                                                              \
+        byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
+        memcpy(temp, (INPUT), sizeof(aes_word_t));                  \
+        ((byte_t*)&((BLOCK).block[0]))[(ROW)] = temp[0];            \
+        ((byte_t*)&((BLOCK).block[1]))[(ROW)] = temp[1];            \
+        ((byte_t*)&((BLOCK).block[2]))[(ROW)] = temp[2];            \
+        ((byte_t*)&((BLOCK).block[3]))[(ROW)] = temp[3];            \
+    })
+
+#ifdef GET_COLUMN
+    #undef GET_COLUMN
+#endif
+#define GET_COLUMN(BLOCK, COLUMN, OUTPUT)                           \
+    byte_t OUTPUT[sizeof(aes_word_t)] = { 0 };                      \
+    __extension__                                                   \
+    ({                                                              \
+        byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
+        temp[0] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[0];         \
+        temp[1] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[1];         \
+        temp[2] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[2];         \
+        temp[3] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[3];         \
+        memcpy((OUTPUT), temp, sizeof(aes_word_t));                 \
+    })
+
+#ifdef SET_COLUMN
+    #undef SET_COLUMN
+#endif
+#define SET_COLUMN(BLOCK, COLUMN, INPUT)                            \
+    __extension__                                                   \
+    ({                                                              \
+        byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
+        memcpy(temp, (INPUT), sizeof(aes_word_t));                  \
+        ((byte_t*)&((BLOCK).block[(COLUMN)]))[0] = temp[0];         \
+        ((byte_t*)&((BLOCK).block[(COLUMN)]))[1] = temp[1];         \
+        ((byte_t*)&((BLOCK).block[(COLUMN)]))[2] = temp[2];         \
+        ((byte_t*)&((BLOCK).block[(COLUMN)]))[3] = temp[3];         \
+    })
+
 void picoutil_aes_init(void)
 {
     picoutil_static_allocator_init(true);
@@ -339,27 +397,29 @@ static inline aes_block_t aes_shift_rows(aes_block_t block)
 {
     for (size_t i = 0; i < picoutil_aes_block_word_count(block.block_size); ++i)
     {
+#if 0
         for (size_t j = 0; j < i; ++j)
             block.block[i] = aes_rot_word_right(block.block[i]);
+#else
+        GET_ROW(block, i, row);
+        aes_word_t full_row = 0;
+        memcpy(&full_row, row, sizeof(aes_word_t));
+        for (size_t j = 0; j < i; ++j)
+            full_row = aes_rot_word_right(full_row);
+        memcpy(row, &full_row, sizeof(aes_word_t));
+        SET_ROW(block, i, row);
+#endif
     }
     return block;
 }
 
 static inline aes_block_t aes_mix_columns(aes_block_t block)
 {
-    aes_word_t block_cpy[picoutil_aes_block_word_count(block.block_size)];
-    picoutil_memset_explicit(block_cpy, 0, sizeof(block_cpy));
-    memcpy(block_cpy, block.block, sizeof(block_cpy));
-    byte_t column[picoutil_aes_block_word_count(block.block_size)];
-    memset(block.block, 0, sizeof(aes_word_t) * picoutil_aes_block_word_count(block.block_size));
     for (size_t i = 0; i < sizeof(aes_word_t); ++i)
     {
-        picoutil_memset_explicit(column, 0, sizeof(column));
-        for (size_t j = 0; j < picoutil_aes_block_word_count(block.block_size); ++j)
-            column[j] = ((byte_t*)&(block_cpy[j]))[i] & 0xff;
+        GET_COLUMN(block, i, column);
         aes_mul_column_by_poly(column);
-        for (size_t j = 0; j < picoutil_aes_block_word_count(block.block_size); ++j)
-            ((byte_t*)&(block.block[j]))[i] = column[j];
+        SET_COLUMN(block, i, column);
     }
     return block;
 }
@@ -381,6 +441,7 @@ static inline aes_block_t aes_add_round_key(aes_block_t block, aes_word_t* round
     return block;
 }
 
+#if 0
 // Takes a block and applies the diagonal symmetry to it as if it were a matrix
 /*
  * Example:
@@ -402,6 +463,25 @@ static inline aes_block_t aes_block_apply_diagonal_symmetry(aes_block_t block)
     block.block[2] = ((block_cpy[0] & UINT32_C(0x0000ff00)) << 16) | ((block_cpy[1] & UINT32_C(0x0000ff00)) << 8) | (block_cpy[2] & UINT32_C(0x0000ff00)) | ((block_cpy[3] & UINT32_C(0x0000ff00)) >> 8);
     block.block[3] = ((block_cpy[0] & UINT32_C(0x000000ff)) << 24) | ((block_cpy[1] & UINT32_C(0x000000ff)) << 16) | ((block_cpy[2] & UINT32_C(0x000000ff)) << 8) | (block_cpy[3] & UINT32_C(0x000000ff));
     
+    return block;
+}
+#endif
+
+static inline aes_block_t aes_prepare_entry(byte_t* entry, aes_block_t block)
+{
+    picoutil_memset_explicit(block.block, 0, sizeof(aes_word_t) * picoutil_aes_block_word_count(block.block_size));
+    byte_t col1[sizeof(aes_word_t)] = { 0 };
+    byte_t col2[sizeof(aes_word_t)] = { 0 };
+    byte_t col3[sizeof(aes_word_t)] = { 0 };
+    byte_t col4[sizeof(aes_word_t)] = { 0 };
+    memcpy(col1, entry, sizeof(aes_word_t));
+    memcpy(col2, entry + sizeof(aes_word_t), sizeof(aes_word_t));
+    memcpy(col3, entry + (sizeof(aes_word_t) * 2), sizeof(aes_word_t));
+    memcpy(col4, entry + (sizeof(aes_word_t) * 3), sizeof(aes_word_t));
+    SET_COLUMN(block, 0, col1);
+    SET_COLUMN(block, 1, col2);
+    SET_COLUMN(block, 2, col3);
+    SET_COLUMN(block, 3, col4);
     return block;
 }
 
@@ -455,16 +535,37 @@ aes_block_t __time_critical_func(picoutil_aes_encrypt_block_until)(aes_block_t b
     memcpy(round_key_block.block, expanded_key.round_keys[0], picoutil_aes_block_word_count(block.block_size) * sizeof(aes_word_t));
     block = aes_add_round_key(aes_block_apply_diagonal_symmetry(block), aes_block_apply_diagonal_symmetry(round_key_block).block);
 #else
+    void print_block(aes_block_t block);
+    int	printf (const char *__restrict, ...)
+               _ATTRIBUTE ((__format__ (__printf__, 1, 2)));
+    aes_block_t key_block = { 0 };
+    key_block.block_size = block.block_size;
+    key_block.block = expanded_key.round_keys[0];
+    printf("RoundKey (0):\n");
+    print_block(key_block);
     block = aes_add_round_key(block, expanded_key.round_keys[0]);
+    printf("AddRoundKey (0):\n");
+    print_block(block);
 #endif
     if (num_round == 0)
         goto ret;
     for (size_t i = 1; i <= num_round && i < expanded_key.round_count; ++i)
     {
         block = aes_sub_bytes(block);
+        printf("SubBytes (%zu):\n", i);
+        print_block(block);
         block = aes_shift_rows(block);
+        printf("ShiftRows (%zu):\n", i);
+        print_block(block);
         block = aes_mix_columns(block);
+        printf("MixColumns (%zu):\n", i);
+        print_block(block);
+        key_block.block = expanded_key.round_keys[i];
+        printf("RoundKey (%zu):\n", i);
+        print_block(key_block);
         block = aes_add_round_key(block, expanded_key.round_keys[i]);
+        printf("AddRoundKey (%zu):\n", i);
+        print_block(block);
     }
     if (num_round < expanded_key.round_count)
         goto ret;
@@ -493,8 +594,9 @@ void print_block(aes_block_t block)
 {
     for (size_t i = 0; i < picoutil_aes_block_word_count(block.block_size); ++i)
     {
+        GET_ROW(block, i, row);
         for (size_t j = 0; j < sizeof(aes_word_t); ++j)
-            printf("%" PRIx8 " ", ((byte_t*)block.block)[i * sizeof(aes_word_t) + j]);
+            printf("%" PRIx8 " ", row[j]);
         puts("");
     }
     puts("");
@@ -513,14 +615,16 @@ void print_key(aes_key_t key)
 
 void print_buf(uint8_t* buf, size_t len)
 {
-    for (size_t i = 0; i < len; ++i)
+    for (size_t i = 0; i < len / sizeof(aes_word_t); ++i)
     {
-        printf("%" PRIx8 " ", buf[i]);
-        if ((i + 1) % sizeof(aes_word_t) == 0)
-            puts("");
+        for (size_t j = 0; j < sizeof(aes_word_t); ++j)
+            printf("%" PRIx8 " ", buf[j * sizeof(aes_word_t) + i]);
+        puts("");
     }
     puts("");
 }
+
+#if 0
 // Works
 void picoutil_test_key_schedule(void)
 {
@@ -611,11 +715,45 @@ void picoutil_test_sub_bytes(void)
     picoutil_static_free(block.block);
 }
 
+void char_buf_set_rows(byte_t rows[4][4], byte_t* buf)
+{
+    for (size_t i = 0; i < 4; ++i)
+    {
+        buf[i] = rows[i][0];
+        buf[i + 4] = rows[i][1];
+        buf[i + 8] = rows[i][2];
+        buf[i + 12] = rows[i][3];
+    }
+
+}
+
+void char_buf_set_cols(byte_t cols[4][4], byte_t* buf)
+{
+    for (size_t i = 0; i < 4; ++i)
+    {
+        buf[i * 4] = cols[i][0];
+        buf[i * 4 + 1] = cols[i][1];
+        buf[i * 4 + 2] = cols[i][2];
+        buf[i * 4 + 3] = cols[i][3];
+    }
+}
+
 // Works
 void picoutil_test_shift_rows(void)
 {
     puts("TESTING SHIFT ROWS...");
-    unsigned char raw_block[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+    byte_t row1[4] = { 1, 2, 3, 4 };
+    byte_t row2[4] = { 5, 6, 7, 8 };
+    byte_t row3[4] = { 9, 10, 11, 12 };
+    byte_t row4[4] = { 13, 14, 15, 16 };
+    unsigned char raw_block[16] = { 0 };
+    byte_t rows[4][4] = {
+        [0] = {1, 2, 3, 4},
+        [1] = {5, 6, 7, 8},
+        [2] = {9, 10, 11, 12},
+        [3] = {13, 14, 15, 16}
+    };
+    char_buf_set_rows(rows, raw_block);
     aes_block_t block = { 0 };
     block.block_size = AES_BLOCK_SIZE_128;
     block.block = picoutil_static_calloc(4, 4);
@@ -624,9 +762,16 @@ void picoutil_test_shift_rows(void)
         printf("Failed to allocate memory\n");
         return;
     }
-    memcpy(block.block, raw_block, sizeof(raw_block));
+    SET_ROW(block, 0, row1);
+    SET_ROW(block, 1, row2);
+    SET_ROW(block, 2, row3);
+    SET_ROW(block, 3, row4);
     printf("Block (before): \n");
     print_block(block);
+    printf("\n");
+    printf("Raw block (before): \n");
+    print_buf(raw_block, count_of(raw_block));
+    printf("\n");
     block = aes_shift_rows(block);
     /*
      * ShiftRows: 1 2 3 4 6 7 8 5 11 12 9 10 16 13 14 15
@@ -640,11 +785,16 @@ void picoutil_test_shift_rows(void)
     picoutil_static_free(block.block);
 }
 
-// Shouldn't work
+// Works
 void picoutil_test_mix_columns(void)
 {
     puts("TESTING MIX COLUMNS...");
-    unsigned char raw_block[] = { 219, 242, 1, 198,  19, 10, 1, 198,  83, 34, 1, 198,  69, 92, 1, 198 };
+
+    byte_t col1[4] = { 219, 19, 83, 69 };
+    byte_t col2[4] = { 242, 10, 34, 92 };
+    byte_t col3[4] = { 1, 1, 1, 1 };
+    byte_t col4[4] = { 198, 198, 198, 198 };
+
     aes_block_t block = { 0 };
     block.block_size = AES_BLOCK_SIZE_128;
     block.block = picoutil_static_calloc(4, 4);
@@ -653,21 +803,29 @@ void picoutil_test_mix_columns(void)
         printf("Failed to allocate memory\n");
         return;
     }
-    memcpy(block.block, raw_block, sizeof(raw_block));
+    SET_COLUMN(block, 0, col1);
+    SET_COLUMN(block, 1, col2);
+    SET_COLUMN(block, 2, col3);
+    SET_COLUMN(block, 3, col4);
     printf("Block (before): \n");
     print_block(block);
     block = aes_mix_columns(block);
     /*
      * MixColumns: 142, 159, 1, 198,  77, 220, 1, 198,  161, 88, 1, 198,  188, 157, 1, 198
      */
-    byte_t expected_block[16] = { 142, 159, 1, 198,  77, 220, 1, 198,  161, 88, 1, 198,  188, 157, 1, 198 };
+    __unused byte_t expected_block[16] = { 142, 159, 1, 198,  77, 220, 1, 198,  161, 88, 1, 198,  188, 157, 1, 198 };
+    __unused byte_t expected_cols[4][4] = {
+        [0] = { 142, 77, 161, 188 },
+        [1] = { 159, 220, 88, 157 },
+        [2] = { 1, 1, 1, 1 },
+        [3] = { 198, 198, 198, 198 }
+    };
     printf("Block: \n");
     print_block(block);
-    printf("Expected block: \n");
-    print_buf(expected_block, count_of(expected_block));
-    puts("");
     picoutil_static_free(block.block);
 }
+
+#endif
 
 #include "../aes_test/aes.h"
 
@@ -699,20 +857,20 @@ void picoutil_test_encryption_ecb_mode(size_t num_rounds)
         picoutil_static_free(key1.key);
         return;
     }
-    memcpy(block1.block, raw_txt, sizeof(raw_txt) - 1);
+    aes_prepare_entry(raw_txt, block1);
     memcpy(key2, raw_key, sizeof(raw_key) - 1);
     memcpy(buffer2, raw_txt, sizeof(raw_txt) - 1);
     AES_init_ctx(&ctx2, key2);
 
-    printf("Block1: (before) \n");
-    print_block(block1);
-    printf("\n");
-    printf("Block2: (before) \n");
-    print_buf(buffer2, count_of(buffer2));
-    printf("Key1: \n");
-    print_key(key1);
-    printf("Key2: \n");
-    print_buf(key2, count_of(key2));
+    /* printf("Block1: (before) \n"); */
+    /* print_block(block1); */
+    /* printf("\n"); */
+    /* printf("Block2: (before) \n"); */
+    /* print_buf(buffer2, count_of(buffer2)); */
+    /* printf("Key1: \n"); */
+    /* print_key(key1); */
+    /* printf("Key2: \n"); */
+    /* print_buf(key2, count_of(key2)); */
 
     printf("\n\n");
     block1 = picoutil_aes_encrypt_block_until(block1, key1, num_rounds);
