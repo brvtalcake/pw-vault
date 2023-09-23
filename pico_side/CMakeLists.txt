@@ -80,7 +80,7 @@ include(${__pico_sdk_path__}/cmake/Platform/PICO.cmake)
 include("pico_sdk_import.cmake")
 include(CheckIPOSupported)
 
-project(store_password C CXX ASM)
+project(pw_vault C CXX ASM)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 20)
 check_ipo_supported(RESULT ipo_supported OUTPUT ipo_supported_output LANGUAGES C CXX)
@@ -94,8 +94,8 @@ else()
 endif()
 
 # For picoflash and picoutil, we need Boost::Preprocessor
-add_compile_options(-I/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/)
-add_compile_options(-I/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/third_party/chaos-pp/)
+add_compile_options(-I/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault/)
+add_compile_options(-I/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault/third_party/chaos-pp/)
 
 #[[ add_compile_definitions(PICO_BOARD=${PICO_BOARD}) ]]
 add_compile_definitions(PICO_GCC_TRIPLE=${PICO_GCC_TRIPLE})
