@@ -51,6 +51,7 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-
-./pico_side/build/*
-./host_side/build/*
+pico_side/build/
+host_side/build/
+pico_side/build/*
+host_side/build/*

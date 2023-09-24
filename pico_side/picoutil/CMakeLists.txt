@@ -1,5 +1,13 @@
+#[[ set(PICOUTIL_VERSION_MAJOR 0) ]]
+#[[ set(PICOUTIL_VERSION_MINOR 1) ]]
+#[[ set(PICOUTIL_VERSION_PATCH 0) ]]
+#[[ set(PICOUTIL_VERSION_MAJOR_DEFINED 1) ]]
+#[[ set(PICOUTIL_VERSION_MINOR_DEFINED 1) ]]
+#[[ set(PICOUTIL_VERSION_PATCH_DEFINED 1) ]]
+
 file(GLOB_RECURSE picoutil_SOURCES "*.h" "*.c" "*.hpp" "*.cpp" "*.s" "*.S")
 add_library(picoutil STATIC ${picoutil_SOURCES})
+#[[ configure_file(picoutil_version.h.in picoutil_version.h @ONLY) ]]
 
 target_link_libraries(
     picoutil

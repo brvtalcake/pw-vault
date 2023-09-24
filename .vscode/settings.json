@@ -43,6 +43,8 @@
         "string_view": "c",
         "ranges": "c",
         "span": "c",
-        "random": "c"
+        "random": "c",
+        "initializer_list": "c",
+        "*.in": "c"
     }
 }

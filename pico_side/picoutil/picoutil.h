@@ -1,6 +1,10 @@
 #ifndef PICOUTIL_H
 #define PICOUTIL_H
 
+#include <picoutil_version.h>
+// TODO: Create picoutil_config.h.in and use CMake to generate all stuffs like `PICO_HAS_XOSC_SUBSYSTEM` and `PICOUTIL_STATIC_BYTES_SIZE`
+/* #include <picoutil_config.h> */
+
 #ifndef BEGIN_DECLS
     #ifdef __cplusplus
         #define BEGIN_DECLS extern "C" {
@@ -25,6 +29,12 @@
 #ifndef PICOUTIL_STATIC_BYTES_SIZE
     #define PICOUTIL_STATIC_BYTES_SIZE (1024 * 2 * 2 * 2 * 2)
 #endif
+
+#ifdef NULL_T
+    #error "NULL_T is already defined"
+    #undef NULL_T
+#endif
+#define NULL_T(TYPE) ((TYPE){ 0 })
 
 #ifdef UNIQUE
     #undef UNIQUE
@@ -72,13 +82,144 @@
 
 #include <third_party/map_macro/map.h>
 #include <third_party/chaos-pp/chaos/preprocessor.h>
+#include CHAOS_PP_PLACEHOLDERS(1)
+
 #include <pico/platform.h>
 #include <hardware/sync.h>
 #include <hardware/divider.h>
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdatomic.h>
+#include <stdatomic.h> // For memory_order enum
+#include <stdalign.h>
+#include <stddef.h>
+
+#include <picoutil_opt_buf.h>
+
+#ifdef STRINGIFY
+    #undef STRINGIFY
+#endif
+#define STRINGIFY(X) STRINGIFY_PRIMITIVE(X)
+
+#ifdef STRINGIFY_PRIMITIVE
+    #undef STRINGIFY_PRIMITIVE
+#endif
+#define STRINGIFY_PRIMITIVE(X) #X
+
+#ifdef STRCATIFY
+    #undef STRCATIFY
+#endif
+#define STRCATIFY(...) STRCATIFY_PRIMITIVE(__VA_ARGS__)
+
+#ifdef STRCATIFY_PRIMITIVE
+    #undef STRCATIFY_PRIMITIVE
+#endif
+#define STRCATIFY_PRIMITIVE(...) STRINGIFY(CHAOS_PP_VARIADIC_CAT(__VA_ARGS__))
+
+#ifdef TO_SEQ
+    #undef TO_SEQ
+#endif
+#define TO_SEQ(...) TO_SEQ_PRIMITIVE(__VA_ARGS__)
+
+#ifdef TO_SEQ_PRIMITIVE
+    #undef TO_SEQ_PRIMITIVE
+#endif
+#define TO_SEQ_PRIMITIVE(...) CHAOS_PP_EXPR(CHAOS_PP_TUPLE_TO_SEQ(CHAOS_PP_VARIADIC_SIZE(__VA_ARGS__), (__VA_ARGS__)))
+
+#ifdef VA_RANGE
+    #undef VA_RANGE
+#endif
+#define VA_RANGE(FROM, TO, ...) VA_RANGE_PRIMITIVE(FROM, TO, __VA_ARGS__)
+
+#ifdef VA_RANGE_PRIMITIVE
+    #undef VA_RANGE_PRIMITIVE
+#endif
+#define VA_RANGE_PRIMITIVE(FROM, TO, ...) CHAOS_PP_EXPR(CHAOS_PP_SEQ_RANGE(FROM, CHAOS_PP_SUB(CHAOS_PP_INC(TO), FROM), TO_SEQ(__VA_ARGS__)))
+
+#ifndef __unused
+    #define __unused ATTRIBUTE(unused)
+#endif
+#ifndef __used
+    #define __used ATTRIBUTE(used)
+#endif
+#ifndef __packed
+    #define __packed ATTRIBUTE(packed)
+#endif
+#ifndef __aligned
+    #define __aligned(X) ATTRIBUTE_WITH_PARAMS(aligned, X)
+#endif
+#ifndef __wur
+    #define __wur ATTRIBUTE(warn_unused_result)
+#endif
+#ifndef __sentinel
+    #define __sentinel ATTRIBUTE(sentinel)
+#endif
+#ifndef __section
+    #define __section(SECTION) ATTRIBUTE_WITH_PARAMS(section, SECTION)
+#endif
+#ifndef __malloc
+    #define __malloc ATTRIBUTE(malloc)
+#endif
+#ifndef __freefunc
+    #define __freefunc(FUNC) ATTRIBUTE_WITH_PARAMS(malloc, FUNC)
+#endif
+#ifndef __fmtfunc
+    #define __fmtfunc(FUNCLIKE, FORMAT_INDEX, FIRST_TO_CHECK) ATTRIBUTE_WITH_PARAMS(format, PP_CAT(__, PP_CAT(FUNCLIKE, __)), FORMAT_INDEX, FIRST_TO_CHECK)
+#endif
+#ifndef __pure
+    #define __pure ATTRIBUTE(pure)
+#endif
+#ifndef __const
+    #define __const ATTRIBUTE(const)
+#endif
+#ifndef __noreturn
+    #include <stdnoreturn.h>
+    #define __noreturn noreturn
+#endif
+#ifndef __deprecated
+    #define __deprecated ATTRIBUTE(deprecated)
+#endif
+#ifndef __deprecated_msg
+    #define __deprecated_msg(MSG) ATTRIBUTE_WITH_PARAMS(deprecated, MSG)
+#endif
+#ifndef __flatten
+    #define __flatten ATTRIBUTE(flatten)
+#endif
+#ifndef __always_inline
+    #define __always_inline ATTRIBUTE(always_inline)
+#endif
+#ifndef __noinline
+    #define __noinline ATTRIBUTE(noinline)
+#endif
+// Useless macro for this project since raspberry pi pico doesn't support shared libraries
+#ifndef __symver
+    #define __symver(SYMBOL, ISDEFAULT, LIBNAME, VERSTR)                                                    \
+        CHAOS_PP_VARIADIC_IF(CHAOS_PP_BOOL(ISDEFAULT))                                                      \
+        (                                                                                                   \
+            ATTRIBUTE_WITH_PARAMS(                                                                          \
+                symver,                                                                                     \
+                STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, CHAOS_PP_PUSH(@, LIBNAME))), _) VERSTR     \
+            )                                                                                               \
+        )                                                                                                   \
+        (                                                                                                   \
+            ATTRIBUTE_WITH_PARAMS(                                                                          \
+                symver,                                                                                     \
+                STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, LIBNAME)), _) VERSTR                       \
+            )                                                                                               \
+        )
+#endif
+#ifndef __cold
+    #define __cold ATTRIBUTE(cold)
+#endif
+#ifndef __hot
+    #define __hot ATTRIBUTE(hot)
+#endif
+#ifndef __fallthrough
+    #define __fallthrough ATTRIBUTE(fallthrough)
+#endif
+#ifndef __unreachable
+    #define __unreachable() __builtin_unreachable()
+#endif
 
 #ifdef POW_2_PRED
     #undef POW_2_PRED
@@ -239,12 +380,20 @@
 #ifdef PP_CAT
     #undef PP_CAT
 #endif
-#define PP_CAT(X, Y) PP_CAT_PRIMITIVE(X, Y)
+#if !CHAOS_PP_VARIADICS
+    #define PP_CAT(X, Y) PP_CAT_PRIMITIVE(X, Y)
+#else
+    #define PP_CAT(...) PP_CAT_PRIMITIVE(__VA_ARGS__)
+#endif
 
 #ifdef PP_CAT_PRIMITIVE
     #undef PP_CAT_PRIMITIVE
 #endif
-#define PP_CAT_PRIMITIVE(X, Y) X ## Y
+#if !CHAOS_PP_VARIADICS
+    #define PP_CAT_PRIMITIVE(X, Y) X ## Y
+#else
+    #define PP_CAT_PRIMITIVE(...) CHAOS_PP_VARIADIC_CAT(__VA_ARGS__)
+#endif
 
 #ifdef HAS_ONE_OF_FLAGS
     #undef HAS_ONE_OF_FLAGS
@@ -630,24 +779,66 @@ typedef struct aes_block
 
 typedef struct aes_context
 {
-    
+    aes_key_t* key;
+    aes_key_expanded_t* key_expanded;
+    aes_block_t* iv;
+    aes_mode mode;
+    aes_dir dir;
+    aes_key_size key_size;
+    aes_block_size block_size;
 } aes_context_t;
 
-void        picoutil_aes_init(void);
-bool        picoutil_aes_error(void);
+typedef struct aes_result
+{
+    byte_t* data;
+    size_t data_size;
+    bool error;
+} aes_result_t;
 
-aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, aes_key_t key);
-aes_block_t __time_critical_func(picoutil_aes_encrypt_block_until)(aes_block_t block, aes_key_t key, size_t num_round);
+void picoutil_aes_init(void);
 
-#if 0
-void        picoutil_test_key_schedule(void);
-void        picoutil_test_sub_bytes(void);
-void        picoutil_test_shift_rows(void);
-void        picoutil_test_mix_columns(void);
+bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size_t bufsize);
+ATTRIBUTE(sentinel)
+bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir dir, aes_key_size key_size, aes_block_size block_size, ...);
+#ifdef picoutil_aes_context_init
+    #undef picoutil_aes_context_init
 #endif
-void        picoutil_test_encryption_ecb_mode(size_t num_rounds);
+/**
+ * @brief Initialize an AES context
+ * @param CTX The context pointer to initialize
+ * @param MODE The mode of operation
+ * @param DIR The direction of operation
+ * @param KEY_SIZE The key size
+ * @param BLOCK_SIZE The block size
+ * @param ... The key and IV (if needed) (key_size and block_size bytes long, respectively)
+ * @return true if the context was initialized successfully, false otherwise
+ * @note The key and IV are copied to the context, so they can be freed after the call. They are assumed to be of type `aes_key_t*` and `aes_block_t*`, respectively
+ */
+#define picoutil_aes_context_init(CTX, MODE, DIR, KEY_SIZE, BLOCK_SIZE, ...) aes_context_init_impl((CTX), (MODE), (DIR), (KEY_SIZE), (BLOCK_SIZE), __VA_ARGS__, NULL)
+void picoutil_aes_context_deinit(aes_context_t* ctx);
+
+ATTRIBUTE(warn_unused_result) ATTRIBUTE(sentinel)
+aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx, byte_t* data, size_t data_size, ...);
+#ifdef picoutil_aes_process
+    #undef picoutil_aes_process
+#endif
+/**
+ * @brief Process data with an AES context
+ * @param CTX The context to use
+ * @param DATA The data to process
+ * @param DATA_SIZE The size of the data to process
+ * @param ... The key and IV (if not already set in the context) (key_size and block_size bytes long, respectively)
+ * @return The processed data
+ * @note The optional key and IV are not copied to the context and are priviledged over the ones in the context if any. They are assumed to be of type `aes_key_t*` and `aes_block_t*`, respectively
+ */
+#define picoutil_aes_process(CTX, DATA, DATA_SIZE, ...) picoutil_aes_process_impl((CTX), (DATA), (DATA_SIZE), __VA_ARGS__, NULL)
+// aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, aes_key_t key);
+// aes_block_t __time_critical_func(picoutil_aes_encrypt_block_until)(aes_block_t block, aes_key_t key, size_t num_round);
+
+void picoutil_test_encryption_ecb_mode(size_t num_rounds);
 
 END_DECLS
+
 
 #ifdef DIVMOD_RAW
     #undef DIVMOD_RAW
@@ -942,6 +1133,23 @@ END_DECLS
 #endif
 
 #ifdef __INTELLISENSE__
+    #define TEST_PREPROCESSOR 1
+    
     #undef POW
     #define POW(...) 0
+    #undef CHAOS_PP_EXPR
+    #define CHAOS_PP_EXPR(...)
+#endif
+
+#if defined(TEST_PREPROCESSOR) && TEST_PREPROCESSOR
+/*
+ * TODO: Write a `VA_RANGE` that could be called like this:
+ * `VA_RANGE(FROM, TO)(...)`
+ */
+VA_RANGE(0, 2, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
+
+CHAOS_PP_EXPAND(CHAOS_PP_INVOKE(_0 CHAOS_PP_LAMBDA(+) _1 CHAOS_PP_LAMBDA(&&) CHAOS_PP_INC_(_1), 1, 2))
+
+__symver(picoutil_aes_init, 1, PICOUTIL, "1.0.0")
+
 #endif
