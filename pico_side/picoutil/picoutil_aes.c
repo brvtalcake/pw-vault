@@ -515,7 +515,7 @@ bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size
     return true;
 }
 
-ATTRIBUTE(sentinel)
+__sentinel __zero_used_regs
 bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir dir, aes_key_size key_size, aes_block_size block_size, ...)
 {
     if (ctx == NULL)
@@ -687,7 +687,7 @@ static aes_user_data_t aes_split_bytes(byte_t* bytes, size_t bytes_count, aes_bl
     return data;
 }
 
-ATTRIBUTE(warn_unused_result) ATTRIBUTE(sentinel)
+__wur __sentinel __zero_used_regs
 aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx, byte_t* data, size_t data_size, ...)
 {
     if (ctx == NULL || data == NULL || data_size == 0)
@@ -850,6 +850,7 @@ void print_buf(uint8_t* buf, size_t len)
 #include "../aes_test/aes.h"
 
 // Doesn't work
+__zero_used_regs
 void picoutil_test_encryption_ecb_mode(size_t num_rounds)
 {
     puts("TESTING ENCRYPTION (ECB MODE)...");

@@ -57,24 +57,45 @@
 #ifdef ATTRIBUTE_WITH_PARAMS
     #undef ATTRIBUTE_WITH_PARAMS
 #endif
-#if !defined(__GNUC__) && !defined(__clang__)
-    #define ATTRIBUTE(X)
-    #define ATTRIBUTE_WITH_PARAMS(X, ...)
-#else
-    #define ATTRIBUTE(X) __attribute__((PP_CAT(__, PP_CAT(X, __))))
-    #define ATTRIBUTE_WITH_PARAMS(X, ...) __attribute__((PP_CAT(__, PP_CAT(X, __))(__VA_ARGS__)))
+#define ATTRIBUTE(X) __attribute__((PP_CAT(__, PP_CAT(X, __))))
+#define ATTRIBUTE_WITH_PARAMS(X, ...) __attribute__((PP_CAT(__, PP_CAT(X, __))(__VA_ARGS__)))
+
+#ifndef UNLIKELY
+    #define UNLIKELY(X) __builtin_expect(!!(X), 0)
+#endif
+#ifndef LIKELY
+    #define LIKELY(X) __builtin_expect(!!(X), 1)
 #endif
 
-#if (defined(__GNUC__) || defined(__clang__)) && !defined(UNLIKELY)
-    #define UNLIKELY(X) __builtin_expect(!!(X), 0)
-#else
-    #define UNLIKELY(X) (X)
+#ifdef HAS_ATTRIBUTE
+    #undef HAS_ATTRIBUTE
 #endif
-#if (defined(__GNUC__) || defined(__clang__)) && !defined(LIKELY)
-    #define LIKELY(X) __builtin_expect(!!(X), 1)
-#else
-    #define LIKELY(X) (X)
+#ifdef HAS_ATTRIBUTE_WITH_PARAMS
+    #undef HAS_ATTRIBUTE_WITH_PARAMS
 #endif
+#define HAS_ATTRIBUTE(X, ATTR) __builtin_has_attribute((X), ATTRIBUTE(ATTR))
+#define HAS_ATTRIBUTE_WITH_PARAMS(X, ATTR, ...) __builtin_has_attribute((X), ATTRIBUTE_WITH_PARAMS(ATTR, __VA_ARGS__))
+
+
+#ifdef TYPES_COMPATIBLE
+    #undef TYPES_COMPATIBLE
+#endif
+#define TYPES_COMPATIBLE(TYPE1, TYPE2) __builtin_types_compatible_p(__typeof__(TYPE1), __typeof__(TYPE2))
+
+#ifdef TYPEOF
+    #undef TYPEOF
+#endif
+#define TYPEOF(EXPR) __typeof__(EXPR)
+
+#ifdef IS_COMPTIME
+    #undef IS_COMPTIME
+#endif
+#define IS_COMPTIME(EXPR) __builtin_constant_p(EXPR)
+
+#ifdef CLASSIFY_EXPR
+    #undef CLASSIFY_EXPR
+#endif
+#define CLASSIFY_EXPR(EXPR) __builtin_classify_type(EXPR)
 
 #ifndef _GNU_SOURCE
     #define _GNU_SOURCE 1
@@ -169,9 +190,10 @@
 #ifndef __pure
     #define __pure ATTRIBUTE(pure)
 #endif
-#ifndef __const
-    #define __const ATTRIBUTE(const)
+#ifdef __const
+    #undef __const
 #endif
+#define __const ATTRIBUTE(const)
 #ifndef __noreturn
     #include <stdnoreturn.h>
     #define __noreturn noreturn
@@ -186,27 +208,31 @@
     #define __flatten ATTRIBUTE(flatten)
 #endif
 #ifndef __always_inline
-    #define __always_inline ATTRIBUTE(always_inline)
+    #define __always_inline inline ATTRIBUTE(always_inline)
 #endif
 #ifndef __noinline
     #define __noinline ATTRIBUTE(noinline)
 #endif
 // Useless macro for this project since raspberry pi pico doesn't support shared libraries
 #ifndef __symver
-    #define __symver(SYMBOL, ISDEFAULT, LIBNAME, VERSTR)                                                    \
-        CHAOS_PP_VARIADIC_IF(CHAOS_PP_BOOL(ISDEFAULT))                                                      \
-        (                                                                                                   \
-            ATTRIBUTE_WITH_PARAMS(                                                                          \
-                symver,                                                                                     \
-                STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, CHAOS_PP_PUSH(@, LIBNAME))), _) VERSTR     \
-            )                                                                                               \
-        )                                                                                                   \
-        (                                                                                                   \
-            ATTRIBUTE_WITH_PARAMS(                                                                          \
-                symver,                                                                                     \
-                STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, LIBNAME)), _) VERSTR                       \
-            )                                                                                               \
-        )
+    #ifdef __ELF__
+        #define __symver(SYMBOL, ISDEFAULT, LIBNAME, VERSTR)                                                    \
+            CHAOS_PP_VARIADIC_IF(CHAOS_PP_BOOL(ISDEFAULT))                                                      \
+            (                                                                                                   \
+                ATTRIBUTE_WITH_PARAMS(                                                                          \
+                    symver,                                                                                     \
+                    STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, CHAOS_PP_PUSH(@, LIBNAME))), _) VERSTR     \
+                )                                                                                               \
+            )                                                                                                   \
+            (                                                                                                   \
+                ATTRIBUTE_WITH_PARAMS(                                                                          \
+                    symver,                                                                                     \
+                    STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, LIBNAME)), _) VERSTR                       \
+                )                                                                                               \
+            )
+    #else
+        #define __symver(SYMBOL, ISDEFAULT, LIBNAME, VERSTR)
+    #endif
 #endif
 #ifndef __cold
     #define __cold ATTRIBUTE(cold)
@@ -220,6 +246,154 @@
 #ifndef __unreachable
     #define __unreachable() __builtin_unreachable()
 #endif
+#ifndef __assume
+    #define __assume(EXPR) ATTRIBUTE_WITH_PARAMS(assume, !!(EXPR))
+#endif
+#ifndef __nonnull_params
+    #define __nonnull_params(...) CHAOS_PP_EXPR(CHAOS_PP_SEQ_FOR_EACH(ATTRIBUTE_WITH_PARAMS_(nonnull, _1), TO_SEQ(__VA_ARGS__)))
+#endif
+#ifndef __wna
+    #define __wna(ALIGN) ATTRIBUTE_WITH_PARAMS(warn_if_not_aligned, ALIGN)
+#endif
+#ifndef __mallocsize
+    #define __mallocsize(SIZE) ATTRIBUTE_WITH_PARAMS(alloc_size, SIZE)
+#endif
+#ifndef __callocsize
+    #define __callocsize(COUNT, ELEMSIZE) ATTRIBUTE_WITH_PARAMS(alloc_size, COUNT, ELEMSIZE)
+#endif
+#ifndef __allocalign
+    #define __allocalign(ALIGN) ATTRIBUTE_WITH_PARAMS(alloc_align, ALIGN)
+#endif
+#ifndef __copy_attr
+    #define __copy_attr(TYPE) ATTRIBUTE_WITH_PARAMS(copy, TYPE)
+#endif
+#ifndef __api_change
+    #define __api_change(OLD, NEW) ATTRIBUTE(unavailable) __deprecated_msg(STRINGIFY(OLD) " has been deprecated. Use " STRINGIFY(NEW) " instead.")
+#endif
+#ifndef __may_alias
+    #define __may_alias ATTRIBUTE(may_alias)
+#endif
+#ifndef __aliases
+    #define __aliases(VAR) ATTRIBUTE(may_alias) __copy_attr(VAR)
+#endif
+#ifndef __use_designated
+    #define __use_designated ATTRIBUTE(designated_init)
+#endif
+#ifndef __little_endian
+    #define __little_endian ATTRIBUTE_WITH_PARAMS(scalar_storage_order, "little-endian")
+#endif
+#ifndef __big_endian
+    #define __big_endian ATTRIBUTE_WITH_PARAMS(scalar_storage_order, "big-endian")
+#endif
+#ifndef __mk_alias
+    #define __mk_alias(ALIAS, TARGET) ATTRIBUTE_WITH_PARAMS(alias, STRINGIFY(TARGET)) __copy_attr(ALIAS) ALIAS
+#endif
+#ifndef __buffer_type
+    #define __buffer_type ATTRIBUTE(nonstring)
+#endif
+#ifndef __cleanup
+    #define __cleanup(FUNC) ATTRIBUTE_WITH_PARAMS(cleanup, FUNC)
+#endif
+#ifndef __common
+    #define __common ATTRIBUTE(common)
+#endif
+#ifndef __nocommon
+    #define __nocommon ATTRIBUTE(nocommon)
+#endif
+#ifndef __param_access
+    #define __param_access(ACCESSMODE, PARAMINDEX, ...) ATTRIBUTE_WITH_PARAMS(access, ACCESSMODE, PARAMINDEX, __VA_ARGS__)
+#endif
+#ifndef __ro_param
+    #define __ro_param(PARAMINDEX, ...) __param_access(read_only, PARAMINDEX, __VA_ARGS__)
+#endif
+#ifndef __wo_param
+    #define __wo_param(PARAMINDEX, ...) __param_access(write_only, PARAMINDEX, __VA_ARGS__)
+#endif
+#ifndef __rw_param
+    #define __rw_param(PARAMINDEX, ...) __param_access(read_write, PARAMINDEX, __VA_ARGS__)
+#endif
+#ifndef __no_access_param
+    #define __no_access_param(PARAMINDEX, ...) __param_access(none, PARAMINDEX, __VA_ARGS__)
+#endif
+#ifndef __isr
+    #define __isr ATTRIBUTE(interrupt)
+#endif
+#ifndef __interrupt
+    #define __interrupt ATTRIBUTE(interrupt) __isr
+#endif
+#ifndef __zero_regs
+    #define __zero_regs(WHICHONES) ATTRIBUTE_WITH_PARAMS(zero_call_used_regs, WHICHONES)
+#endif
+#ifndef __zero_used_regs
+    #define __zero_used_regs __zero_regs("used")
+#endif
+#ifndef __zero_all_regs
+    #define __zero_all_regs __zero_regs("all")
+#endif
+#ifndef __malloca
+    #define __malloca(SIZE) __builtin_alloca_with_align((SIZE), __alignof__(max_align_t))
+#endif
+#ifndef __malloca_aligned
+    #define __malloca_aligned(SIZE, ALIGN) __builtin_alloca_with_align((SIZE), (ALIGN))
+#endif
+#ifndef __calloca
+    #define __calloca(COUNT, ELEMSIZE) picoutil_memset_explicit(__builtin_alloca_with_align((COUNT) * (ELEMSIZE), __alignof__(max_align_t)), 0, (COUNT) * (ELEMSIZE))
+#endif
+#ifndef __calloca_aligned
+    #define __calloca_aligned(COUNT, ELEMSIZE, ALIGN) picoutil_memset_explicit(__builtin_alloca_with_align((COUNT) * (ELEMSIZE), (ALIGN)), 0, (COUNT) * (ELEMSIZE))
+#endif
+#ifndef __time_critical_func
+    #define __time_critical_func(FUNC) __not_in_flash_func(FUNC)
+#endif
+#ifndef __min_size
+    // Te be used in array function parameters declaration / definition (e.g. `void foo(int array[__min_size(10)]);`)
+    #define __min_size(SIZE) static (SIZE)
+#endif
+#ifndef __DEQUALIFY
+    #define __DEQUALIFY(TYPE, VAR) ((VAR)(uintptr_t)(const volatile void *)(VAR))
+#endif
+#ifdef DEQUALIFY_PTR
+    #undef DEQUALIFY_PTR
+#endif
+#define DEQUALIFY_PTR(VAR) __DEQUALIFY(__typeof__(VAR), VAR)
+
+#ifndef __offsetof
+    #define __offsetof(TYPE, MEMBER) offsetof(TYPE, MEMBER)
+#endif
+
+#ifndef __containerof
+    // Meant to be used like this: `__containerof(struct_ptr, struct_type, member_name)`
+    #define __containerof(x, s, m) ({					            \
+    const volatile __typeof(((s *)0)->m) *__x = (x);		        \
+    __DEQUALIFY(s *, (const volatile char *)__x - __offsetof(s, m));\
+})
+#endif
+#ifndef __assume_aligned
+    #define __assume_aligned(PTR, ALIGN) __builtin_assume_aligned((PTR), (ALIGN))
+#endif
+#ifndef __artificial
+    #define __artificial ATTRIBUTE(artificial)
+#endif
+
+#ifdef ATTRIBUTE_ID
+    #undef ATTRIBUTE_ID
+#endif
+#define ATTRIBUTE_ID() ATTRIBUTE
+
+#ifdef ATTRIBUTE_WITH_PARAMS_ID
+    #undef ATTRIBUTE_WITH_PARAMS_ID
+#endif
+#define ATTRIBUTE_WITH_PARAMS_ID() ATTRIBUTE_WITH_PARAMS
+
+#ifdef ATTRIBUTE_
+    #undef ATTRIBUTE_
+#endif
+#define ATTRIBUTE_ CHAOS_PP_LAMBDA(ATTRIBUTE_ID)()
+
+#ifdef ATTRIBUTE_WITH_PARAMS_
+    #undef ATTRIBUTE_WITH_PARAMS_
+#endif
+#define ATTRIBUTE_WITH_PARAMS_ CHAOS_PP_LAMBDA(ATTRIBUTE_WITH_PARAMS_ID)()
 
 #ifdef POW_2_PRED
     #undef POW_2_PRED
@@ -410,21 +584,23 @@ BEGIN_DECLS
 
 typedef uint8_t byte_t;
 
+#define byte_t __buffer_type byte_t
+
 void      picoutil_static_allocator_init(bool safe);
 bool      picoutil_static_allocator_set_safe(bool safe);
 bool      picoutil_static_allocator_is_safe(void);
 
-ATTRIBUTE(malloc) ATTRIBUTE(warn_unused_result)
+__malloc __wur __mallocsize(1) __allocalign(2)
 void*     __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t requested_align);
-ATTRIBUTE(malloc) ATTRIBUTE(warn_unused_result)
+__malloc __wur __mallocsize(1)
 void*     __time_critical_func(picoutil_static_alloc)(size_t size);
-ATTRIBUTE(malloc) ATTRIBUTE(warn_unused_result)
+__malloc __wur __callocsize(1, 2) __allocalign(3)
 void*     __time_critical_func(picoutil_static_calloc_aligned)(size_t count, size_t size, size_t requested_align);
-ATTRIBUTE(malloc) ATTRIBUTE(warn_unused_result)
+__malloc __wur __callocsize(1, 2)
 void*     __time_critical_func(picoutil_static_calloc)(size_t count, size_t size);
-ATTRIBUTE(warn_unused_result)
+__wur
 void*     __time_critical_func(picoutil_static_realloc_aligned)(void* ptr, size_t size, size_t requested_align);
-ATTRIBUTE(warn_unused_result)
+__wur
 void*     __time_critical_func(picoutil_static_realloc)(void* ptr, size_t size);
 
 void      __time_critical_func(picoutil_static_free)(void* ptr);
@@ -460,8 +636,8 @@ enum barrier_option
     BARRIER_OPTIONS_COUNT = 9
 };
 
-static inline
-void picoutil_memset_explicit(void* ptr, byte_t value, size_t size)
+__artificial __always_inline
+static inline void picoutil_memset_explicit(void* ptr, byte_t value, size_t size)
 {
     byte_t* ptr_ = (byte_t*)ptr;
     for (size_t i = 0; i < size; i++)
@@ -480,8 +656,8 @@ void picoutil_memset_explicit(void* ptr, byte_t value, size_t size)
     );
 }
 
-static inline
-void __time_critical_func(picoutil_memory_barrier)(enum barrier_option option)
+__artificial __always_inline
+static inline void __time_critical_func(picoutil_memory_barrier)(enum barrier_option option)
 {
     switch (option)
     {
@@ -535,8 +711,8 @@ void __time_critical_func(picoutil_memory_barrier)(enum barrier_option option)
     }
 }
 
-static inline
-void __time_critical_func(picoutil_sync_barrier)(enum barrier_target target, enum barrier_option option)
+__artificial __always_inline
+static inline void __time_critical_func(picoutil_sync_barrier)(enum barrier_target target, enum barrier_option option)
 {
     switch (target)
     {
@@ -798,7 +974,7 @@ typedef struct aes_result
 void picoutil_aes_init(void);
 
 bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size_t bufsize);
-ATTRIBUTE(sentinel)
+__sentinel __zero_used_regs
 bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir dir, aes_key_size key_size, aes_block_size block_size, ...);
 #ifdef picoutil_aes_context_init
     #undef picoutil_aes_context_init
@@ -817,7 +993,7 @@ bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir d
 #define picoutil_aes_context_init(CTX, MODE, DIR, KEY_SIZE, BLOCK_SIZE, ...) aes_context_init_impl((CTX), (MODE), (DIR), (KEY_SIZE), (BLOCK_SIZE), __VA_ARGS__, NULL)
 void picoutil_aes_context_deinit(aes_context_t* ctx);
 
-ATTRIBUTE(warn_unused_result) ATTRIBUTE(sentinel)
+__wur __sentinel __zero_used_regs
 aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx, byte_t* data, size_t data_size, ...);
 #ifdef picoutil_aes_process
     #undef picoutil_aes_process
@@ -835,6 +1011,7 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
 // aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, aes_key_t key);
 // aes_block_t __time_critical_func(picoutil_aes_encrypt_block_until)(aes_block_t block, aes_key_t key, size_t num_round);
 
+__zero_used_regs
 void picoutil_test_encryption_ecb_mode(size_t num_rounds);
 
 END_DECLS
@@ -970,8 +1147,8 @@ END_DECLS
 
 BEGIN_DECLS
 
-static inline ATTRIBUTE(const)
-uint32_t picoutil_rotate_right_32(uint32_t x, uint32_t y)
+__artificial __const __always_inline
+static inline uint32_t picoutil_rotate_right_32(uint32_t x, uint32_t y)
 {
     register uint32_t x_reg = x;
     register uint32_t y_reg = MODu32(y, 32);
@@ -985,8 +1162,8 @@ uint32_t picoutil_rotate_right_32(uint32_t x, uint32_t y)
     return x_reg;
 }
 
-static inline ATTRIBUTE(const)
-uint32_t picoutil_rotate_left_32(uint32_t x, uint32_t y)
+__artificial __const __always_inline
+static inline uint32_t picoutil_rotate_left_32(uint32_t x, uint32_t y)
 {
     // Take a value for `actual_y` such that the right rotation by its value is equivalent to the wanted left rotation
     uint32_t actual_y = 32 - MODu32(y, 32);
@@ -1152,4 +1329,6 @@ CHAOS_PP_EXPAND(CHAOS_PP_INVOKE(_0 CHAOS_PP_LAMBDA(+) _1 CHAOS_PP_LAMBDA(&&) CHA
 
 __symver(picoutil_aes_init, 1, PICOUTIL, "1.0.0")
 
+__nonnull_params(0)
+__nonnull_params(1, 2, 3)
 #endif

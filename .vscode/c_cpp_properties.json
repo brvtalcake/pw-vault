@@ -3,6 +3,7 @@
         {
             "name": "Raspi-pico",
             "compilerPath": "/usr/bin/arm-none-eabi-gcc",
+            "compilerArgs": ["-mcpu=cortex-m0plus"],
             "includePath": [
                 "${workspaceFolder}/**",
                 "/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/",

@@ -89,11 +89,13 @@ static bool picoutil_static_allocator_safe = true;
 auto_init_recursive_mutex(picoutil_static_bytes_mutex); // <=> static recursive_mutex_t picoutil_static_bytes_mutex; (but initialized)
 static intptr_t first_hdr_off = 0;
 
+__always_inline __wur
 static inline bool check_alignment_requirements(void* ptr, size_t alignment)
 {
     return MODu32((uintptr_t)ptr, alignment) == 0;
 }
 
+__always_inline __wur
 static inline memory_offset_t align_ptr(void* ptr, size_t alignment)
 {
     void* ptr_cpy = ptr;
@@ -165,7 +167,7 @@ void picoutil_static_allocator_init(bool safe)
     picoutil_static_bytes_initialized = true;
 }
 
-ATTRIBUTE(malloc) ATTRIBUTE(warn_unused_result)
+__malloc __wur __mallocsize(1) __allocalign(2)
 void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t requested_align)
 {
     if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
@@ -202,13 +204,13 @@ void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t re
     return NULL;
 }
 
-ATTRIBUTE(malloc) ATTRIBUTE(warn_unused_result)
+__malloc __wur __mallocsize(1)
 void* __time_critical_func(picoutil_static_alloc)(size_t size)
 {
     return picoutil_static_alloc_aligned(size, alignof(max_align_t));
 }
 
-ATTRIBUTE(malloc) ATTRIBUTE(warn_unused_result)
+__malloc __wur __callocsize(1, 2) __allocalign(3)
 void* __time_critical_func(picoutil_static_calloc_aligned)(size_t count, size_t size, size_t requested_align)
 {
     void* ptr = picoutil_static_alloc_aligned(size * count, requested_align);
@@ -218,7 +220,7 @@ void* __time_critical_func(picoutil_static_calloc_aligned)(size_t count, size_t 
     return ptr;
 }
 
-ATTRIBUTE(malloc) ATTRIBUTE(warn_unused_result)
+__malloc __wur __callocsize(1, 2)
 void* __time_critical_func(picoutil_static_calloc)(size_t count, size_t size)
 {
     return picoutil_static_calloc_aligned(size, count, alignof(max_align_t));
@@ -436,7 +438,7 @@ void __time_critical_func(picoutil_static_free_all_except)(void** ptr, size_t co
 }
 
 // Reallocate previously allocated memory, but this time with a specified alignment
-ATTRIBUTE(warn_unused_result)
+__wur
 void* __time_critical_func(picoutil_static_realloc_aligned)(void* ptr, size_t size, size_t requested_align)
 {
     if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
@@ -445,7 +447,7 @@ void* __time_critical_func(picoutil_static_realloc_aligned)(void* ptr, size_t si
     return picoutil_static_alloc_aligned(size, requested_align);
 }
 
-ATTRIBUTE(warn_unused_result)
+__wur
 void* __time_critical_func(picoutil_static_realloc)(void* ptr, size_t size)
 {
     return picoutil_static_realloc_aligned(ptr, size, alignof(max_align_t));
