@@ -23,7 +23,8 @@
 #ifndef PICO_HAS_XOSC_SUBSYSTEM
     // ROSC should not be used as an entropy source if MCU is running with it as the clock source
     // (i.e. we don't have a "better" clock source (the XOSC))
-    #define PICO_RAND_ENTROPY_SRC_ROSC 0
+
+    /* #define PICO_RAND_ENTROPY_SRC_ROSC 0 */
 #endif
 
 #ifndef PICOUTIL_STATIC_BYTES_SIZE
@@ -39,7 +40,7 @@
 #ifdef UNIQUE
     #undef UNIQUE
 #endif
-#define UNIQUE(X) PP_CAT(PP_CAT(X, _), __LINE__)
+#define UNIQUE(X) PP_CAT(__, X, _, __LINE__, __)
 
 #ifdef sizeofexpr
     #undef sizeofexpr
@@ -61,10 +62,14 @@
 #define ATTRIBUTE_WITH_PARAMS(X, ...) __attribute__((PP_CAT(__, PP_CAT(X, __))(__VA_ARGS__)))
 
 #ifndef UNLIKELY
-    #define UNLIKELY(X) __builtin_expect(!!(X), 0)
+    #define UNLIKELY(X) __builtin_expect(BIT(X), false)
 #endif
 #ifndef LIKELY
-    #define LIKELY(X) __builtin_expect(!!(X), 1)
+    #define LIKELY(X) __builtin_expect(BIT(X), true)
+#endif
+
+#ifndef BIT
+    #define BIT(X) (!!(X))
 #endif
 
 #ifdef HAS_ATTRIBUTE
@@ -114,6 +119,7 @@
 #include <stdatomic.h> // For memory_order enum
 #include <stdalign.h>
 #include <stddef.h>
+#include <stdarg.h>
 
 #include <picoutil_opt_buf.h>
 
@@ -337,10 +343,10 @@
     #define __malloca_aligned(SIZE, ALIGN) __builtin_alloca_with_align((SIZE), (ALIGN))
 #endif
 #ifndef __calloca
-    #define __calloca(COUNT, ELEMSIZE) picoutil_memset_explicit(__builtin_alloca_with_align((COUNT) * (ELEMSIZE), __alignof__(max_align_t)), 0, (COUNT) * (ELEMSIZE))
+    #define __calloca(COUNT, ELEMSIZE) memset(__builtin_alloca_with_align((COUNT) * (ELEMSIZE), __alignof__(max_align_t)), 0, (COUNT) * (ELEMSIZE))
 #endif
 #ifndef __calloca_aligned
-    #define __calloca_aligned(COUNT, ELEMSIZE, ALIGN) picoutil_memset_explicit(__builtin_alloca_with_align((COUNT) * (ELEMSIZE), (ALIGN)), 0, (COUNT) * (ELEMSIZE))
+    #define __calloca_aligned(COUNT, ELEMSIZE, ALIGN) memset(__builtin_alloca_with_align((COUNT) * (ELEMSIZE), (ALIGN)), 0, (COUNT) * (ELEMSIZE))
 #endif
 #ifndef __time_critical_func
     #define __time_critical_func(FUNC) __not_in_flash_func(FUNC)
@@ -584,7 +590,7 @@ BEGIN_DECLS
 
 typedef uint8_t byte_t;
 
-#define byte_t __buffer_type byte_t
+// #define byte_t __buffer_type byte_t
 
 void      picoutil_static_allocator_init(bool safe);
 bool      picoutil_static_allocator_set_safe(bool safe);
@@ -636,17 +642,55 @@ enum barrier_option
     BARRIER_OPTIONS_COUNT = 9
 };
 
+#if 0
+
 __artificial __always_inline
-static inline void picoutil_memset_explicit(void* ptr, byte_t value, size_t size)
+static inline void picoutil_explicit_bzero(void* const ptr, const size_t size)
 {
-    byte_t* ptr_ = (byte_t*)ptr;
+    byte_t* const ptr_ = (byte_t*)ptr;
+    register const uint32_t reg_1 __asm__("r0") = 0;
+    register const uint32_t reg_2 __asm__("r1") = 0;
+    register const uint32_t reg_3 __asm__("r2") = 0;
+    register const uint32_t reg_4 __asm__("r3") = 0;
+    size_t i;
+    for (i = 0; i < size / 16; ++i)
+    {
+        byte_t* ptr_i = ptr_ + i * 16;
+        pico_default_asm_volatile(
+            "stm %[ptr_i]!, {%[reg1], %[reg2], %[reg3], %[reg4]}\n\t"
+            : [ptr_i] "+l" (ptr_i)
+            : [reg1] "l" (reg_1), [reg2] "l" (reg_2), [reg3] "l" (reg_3), [reg4] "l" (reg_4)
+            : "memory"
+        );
+    }
+    for (i = i * 16; i < size; ++i)
+    {
+        byte_t* ptr_i = ptr_ + i;
+        pico_default_asm_volatile(
+            "strb %[reg], [%[ptr_i]]\n\t"
+            : [ptr_i] "+l" (ptr_i)
+            : [reg] "l" (reg_1)
+            : "memory"
+        );
+    }
+    pico_default_asm_volatile(
+        "\tisb sy\n\tdsb sy\n\t" : : "r" (ptr_) /* mark it as input */ : "memory"
+    );
+}
+
+#endif
+
+__artificial __always_inline
+static inline void picoutil_memset_explicit(void* const ptr, const byte_t value, const size_t size)
+{
+    byte_t* const ptr_ = (byte_t*)ptr;
     for (size_t i = 0; i < size; i++)
     {
         byte_t* ptr_i = ptr_ + i;
         /* `value` and `ptr_i` must be in one of the following registers: r0 to r7 */
         pico_default_asm_volatile(
             "strb %[value], [%[ptr_i]]\n\t"
-            : /* no output (at least no output wanted) */
+            : "=m" (*ptr_i)
             : [value] "l" (value), [ptr_i] "l" (ptr_i)
             : "memory"
         );
@@ -853,30 +897,20 @@ typedef enum
     AES_KEY_SIZE_256 = 2
 } aes_key_size;
 
-#ifdef TYPEOF
-    #undef TYPEOF
+#ifdef picoutil_aes_round_count_by_key
+    #undef picoutil_aes_round_count_by_key
 #endif
-#define TYPEOF(EXPR)                \
-    _Generic((EXPR),                \
-        uint8_t: uint8_t,           \
-        uint16_t: uint16_t,         \
-        uint32_t: uint32_t,         \
-        uint64_t: uint64_t,         \
-        int8_t: int8_t,             \
-        int16_t: int16_t,           \
-        int32_t: int32_t,           \
-        int64_t: int64_t,           \
-        void: void,                 \
-        /* Add types here */        \
-        default: __typeof__((EXPR)) \
-    )
+#define picoutil_aes_round_count_by_key(KEY_SIZE)                                                       \
+    ((KEY_SIZE) == AES_KEY_SIZE_128 ? 10 : ((KEY_SIZE) == AES_KEY_SIZE_192 ? 12 :                       \
+    ((KEY_SIZE) == AES_KEY_SIZE_256 ? 14 : -1)))
 
 #ifdef picoutil_aes_round_count
     #undef picoutil_aes_round_count
 #endif
-#define picoutil_aes_round_count(KEY_SIZE)                                                              \
-    ((KEY_SIZE) == AES_KEY_SIZE_128 ? 10 : ((KEY_SIZE) == AES_KEY_SIZE_192 ? 12 :                       \
-    ((KEY_SIZE) == AES_KEY_SIZE_256 ? 14 : -1)))
+#define picoutil_aes_round_count(KEY_SIZE, BLOCK_SIZE)                                                      \
+    (picoutil_aes_key_word_count(KEY_SIZE) > picoutil_aes_block_word_count(BLOCK_SIZE) ?                    \
+    (picoutil_aes_key_word_count(KEY_SIZE) > 0 ? picoutil_aes_key_word_count(KEY_SIZE) + 6 : -1) :          \
+    (picoutil_aes_block_word_count(BLOCK_SIZE) > 0 ? picoutil_aes_block_word_count(BLOCK_SIZE) + 6 : -1))
 
 #ifdef picoutil_aes_key_word_count
     #undef picoutil_aes_key_word_count
@@ -1304,8 +1338,6 @@ END_DECLS
     })
 // Rotate the digits to the right instead of the bits
 #define ROR_DIGITS(X, Y) ROL_DIGITS((X), (MODu32((DIGIT_COUNT(X) - (Y)), DIGIT_COUNT(X))))
-
-
 
 #endif
 

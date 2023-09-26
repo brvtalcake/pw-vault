@@ -45,6 +45,11 @@
         "span": "c",
         "random": "c",
         "initializer_list": "c",
-        "*.in": "c"
+        "*.in": "c",
+        "system_error": "c",
+        "functional": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c"
     }
 }

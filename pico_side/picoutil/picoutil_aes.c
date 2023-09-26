@@ -1,6 +1,8 @@
 #include <picoutil.h>
 
 #include <pico/sync.h>
+// TODO: Maybe configure the hardware interpolator to accelerate the speed of some calculations
+/* #include <hardware/interp.h> */
 
 #include <stdarg.h>
 #include <string.h>
@@ -14,37 +16,49 @@ typedef struct aes_user_data
 #ifdef GET_ROW
     #undef GET_ROW
 #endif
-#define GET_ROW(BLOCK, ROW, OUTPUT)                                 \
-    byte_t OUTPUT[sizeof(aes_word_t)] = { 0 };                      \
-    __extension__                                                   \
-    ({                                                              \
-        byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
-        temp[0] = ((byte_t*)&((BLOCK).block[0]))[(ROW)];            \
-        temp[1] = ((byte_t*)&((BLOCK).block[1]))[(ROW)];            \
-        temp[2] = ((byte_t*)&((BLOCK).block[2]))[(ROW)];            \
-        temp[3] = ((byte_t*)&((BLOCK).block[3]))[(ROW)];            \
-        memcpy((OUTPUT), temp, sizeof(aes_word_t));                 \
+#define GET_ROW(BLOCK, ROW, OUTPUT)                                             \
+    picoutil_memset_explicit(OUTPUT, 0, sizeof(OUTPUT));                        \
+    __extension__                                                               \
+    ({                                                                          \
+        byte_t temp[picoutil_aes_block_word_count((BLOCK).block_size)];         \
+        for ( size_t UNIQUE(i) = 0;                                             \
+              UNIQUE(i) < picoutil_aes_block_word_count((BLOCK).block_size);    \
+              ++UNIQUE(i))                                                      \
+            temp[UNIQUE(i)] = ((byte_t*)&((BLOCK).block[UNIQUE(i)]))[(ROW)];    \
+        memcpy((OUTPUT), temp, sizeof(OUTPUT));                                 \
     })
+
+/*     byte_t OUTPUT[picoutil_aes_block_word_count((BLOCK).block_size)];           \ */
 
 #ifdef SET_ROW
     #undef SET_ROW
 #endif
-#define SET_ROW(BLOCK, ROW, INPUT)                                  \
-    __extension__                                                   \
-    ({                                                              \
-        byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
-        memcpy(temp, (INPUT), sizeof(aes_word_t));                  \
-        ((byte_t*)&((BLOCK).block[0]))[(ROW)] = temp[0];            \
-        ((byte_t*)&((BLOCK).block[1]))[(ROW)] = temp[1];            \
-        ((byte_t*)&((BLOCK).block[2]))[(ROW)] = temp[2];            \
-        ((byte_t*)&((BLOCK).block[3]))[(ROW)] = temp[3];            \
+#define SET_ROW(BLOCK, ROW, INPUT)                                              \
+    __extension__                                                               \
+    ({                                                                          \
+        byte_t temp[picoutil_aes_block_word_count((BLOCK).block_size)];         \
+        picoutil_memset_explicit(temp, 0, sizeof(temp));                        \
+        memcpy(temp, (INPUT), sizeof(temp));                                    \
+        for ( size_t UNIQUE(i) = 0;                                             \
+              UNIQUE(i) < picoutil_aes_block_word_count((BLOCK).block_size);    \
+              ++UNIQUE(i))                                                      \
+            ((byte_t*)&((BLOCK).block[UNIQUE(i)]))[(ROW)] = temp[UNIQUE(i)];    \
     })
 
 #ifdef GET_COLUMN
     #undef GET_COLUMN
 #endif
-#define GET_COLUMN(BLOCK, COLUMN, OUTPUT)                           \
-    byte_t OUTPUT[sizeof(aes_word_t)] = { 0 };                      \
+#define GET_COLUMN(BLOCK, COLUMN, OUTPUT)                                       \
+    byte_t OUTPUT[sizeof(aes_word_t)] = { 0 };                                  \
+    __extension__                                                               \
+    ({                                                                          \
+        byte_t temp[sizeof(aes_word_t)] = { 0 };                                \
+        for (size_t UNIQUE(i) = 0; UNIQUE(i) < sizeof(aes_word_t); ++UNIQUE(i)) \
+            temp[UNIQUE(i)] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[UNIQUE(i)]; \
+        memcpy((OUTPUT), temp, sizeof(aes_word_t));                             \
+    })
+
+/*     byte_t OUTPUT[sizeof(aes_word_t)] = { 0 };                      \
     __extension__                                                   \
     ({                                                              \
         byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
@@ -55,11 +69,20 @@ typedef struct aes_user_data
         memcpy((OUTPUT), temp, sizeof(aes_word_t));                 \
     })
 
+ */
 #ifdef SET_COLUMN
     #undef SET_COLUMN
 #endif
-#define SET_COLUMN(BLOCK, COLUMN, INPUT)                            \
-    __extension__                                                   \
+#define SET_COLUMN(BLOCK, COLUMN, INPUT)                                        \
+    __extension__                                                               \
+    ({                                                                          \
+        byte_t temp[sizeof(aes_word_t)] = { 0 };                                \
+        memcpy(temp, (INPUT), sizeof(aes_word_t));                              \
+        for (size_t UNIQUE(i) = 0; UNIQUE(i) < sizeof(aes_word_t); ++UNIQUE(i)) \
+            ((byte_t*)&((BLOCK).block[(COLUMN)]))[UNIQUE(i)] = temp[UNIQUE(i)]; \
+    })
+
+/*     __extension__                                                   \
     ({                                                              \
         byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
         memcpy(temp, (INPUT), sizeof(aes_word_t));                  \
@@ -67,14 +90,14 @@ typedef struct aes_user_data
         ((byte_t*)&((BLOCK).block[(COLUMN)]))[1] = temp[1];         \
         ((byte_t*)&((BLOCK).block[(COLUMN)]))[2] = temp[2];         \
         ((byte_t*)&((BLOCK).block[(COLUMN)]))[3] = temp[3];         \
-    })
+    }) */
 
 void picoutil_aes_init(void)
 {
     picoutil_static_allocator_init(true);
 }
 
-ATTRIBUTE(const)
+__const
 static inline byte_t aes_round_constant_calc_rc(uint8_t round)
 {
     switch (round)
@@ -108,14 +131,14 @@ static inline byte_t aes_round_constant_calc_rc(uint8_t round)
     return (byte_t)-1;
 }
 
-ATTRIBUTE(const)
+__const
 static inline aes_word_t aes_round_constant(uint8_t round)
 {
     byte_t rcon[4] = { aes_round_constant_calc_rc(round), 0, 0, 0 };
     return *(aes_word_t*)rcon;
 }
 
-ATTRIBUTE(const)
+__const
 static byte_t aes_sbox(byte_t x)
 {
     static const byte_t sbox[256] = {
@@ -187,7 +210,7 @@ static byte_t aes_sbox(byte_t x)
     return sbox[x];
 }
 
-ATTRIBUTE(const)
+__const
 static byte_t aes_inv_sbox(byte_t x)
 {
     static const byte_t inv_sbox[256] = {
@@ -259,7 +282,7 @@ static byte_t aes_inv_sbox(byte_t x)
     return inv_sbox[x];
 }
 
-ATTRIBUTE(const) ATTRIBUTE(flatten)
+__const __flatten
 static inline aes_word_t aes_sub_word(aes_word_t x)
 {
     byte_t bytes[sizeof(aes_word_t)] = { 0 };
@@ -272,7 +295,7 @@ static inline aes_word_t aes_sub_word(aes_word_t x)
     return x;
 }
 
-ATTRIBUTE(const) ATTRIBUTE(flatten)
+__const __flatten
 static inline aes_word_t aes_inv_sub_word(aes_word_t x)
 {
     byte_t bytes[sizeof(aes_word_t)] = { 0 };
@@ -286,48 +309,60 @@ static inline aes_word_t aes_inv_sub_word(aes_word_t x)
 }
 
 // Rotate the bytes in a 32-bit word left by one
-ATTRIBUTE(const) ATTRIBUTE(flatten)
+__const __flatten
 static inline aes_word_t aes_rot_word_left(aes_word_t x)
 {
     return ROTATE(LEFT, x, 8);
 }
 
 // Rotate the bytes in a 32-bit word right by one
-ATTRIBUTE(const) ATTRIBUTE(flatten)
+__const __flatten
 static inline aes_word_t aes_rot_word_right(aes_word_t x)
 {
     return ROTATE(RIGHT, x, 8);
 }
 
+__const __always_inline __flatten
+static inline size_t max_between(size_t a, size_t b)
+{
+    return a > b ? a : b;
+}
+
 static aes_key_expanded_t aes_key_schedule(aes_key_t key, ATTRIBUTE(unused) aes_block_size bsize)
 {
-    picoutil_static_allocator_init(true);
+    picoutil_static_allocator_set_safe(true);
+    
     const aes_word_t N = picoutil_aes_key_word_count(key.key_size);
-    const size_t R = picoutil_aes_round_count(key.key_size) + 1;
     // In 32-bit words (aes_word_t)
     const aes_word_t BSIZE = picoutil_aes_block_word_count(bsize);
-    // To change when considering block size
-    // sizeof(full_expanded_key) (IN BITS) == {4 * 11 * 32 (for AES-128), 4 * 13 * 32 (for AES-192), 4 * 15 * 32 (for AES-256)}
-    aes_word_t full_expanded_key[BSIZE * (picoutil_aes_round_count(key.key_size) + 1)];
+    const ptrdiff_t R_ = picoutil_aes_round_count(key.key_size, bsize);
+    static const size_t MAX_RND_COUNT = 14;
+    static const size_t MAX_BLOCK_WORD_CNT = 256 / (sizeof(aes_word_t) * 8); // = 8
+    if (R_ < 0 || BSIZE * R_ > MAX_BLOCK_WORD_CNT * (MAX_RND_COUNT + 1)) // Sanity checks to avoid stack overflow
+        return NULL_T(aes_key_expanded_t);
+    const size_t R = (size_t)R_ + 1;
+
+    aes_word_t full_expanded_key[BSIZE * R];
     picoutil_memset_explicit(full_expanded_key, 0, sizeof(full_expanded_key));
-    for (size_t i = 0; i < BSIZE * (picoutil_aes_round_count(key.key_size) + 1); ++i)
+
+    for (size_t i = 0; i < BSIZE * R; ++i)
     {
         divmod_result_t divmod = DIVMODu32(i, N);
         if (i < N)
             full_expanded_key[i] = key.key[i];
-        else if (to_remainder_u32(divmod) == 0)
+        else if (to_remainder_u32(divmod) == 0) // && i >= N
             full_expanded_key[i] = full_expanded_key[i - N]                 ^
                 aes_sub_word(aes_rot_word_right(full_expanded_key[i - 1]))  ^
                 aes_round_constant(to_quotient_u32(divmod));
-        else if (N > 6 && to_remainder_u32(divmod) == 4)
+        else if (N > 6 && to_remainder_u32(divmod) == 4) // && i >= N
             full_expanded_key[i] = full_expanded_key[i - N] ^ aes_sub_word(full_expanded_key[i - 1]);
-        else
+        else // if (N <= 6 || to_remainder_u32(divmod) != 4) // && i >= N
             full_expanded_key[i] = full_expanded_key[i - N] ^ full_expanded_key[i - 1];
     }
-    aes_key_expanded_t expanded_key = { .round_keys = picoutil_static_calloc(picoutil_aes_round_count(key.key_size) + 1, sizeof(aes_word_t*)) };
+    aes_key_expanded_t expanded_key = { .round_keys = picoutil_static_calloc(R, sizeof(aes_word_t*)) };
     if (expanded_key.round_keys == NULL)
         return (aes_key_expanded_t){ 0 };
-    for (size_t i = 0; i < picoutil_aes_round_count(key.key_size) + 1; ++i)
+    for (size_t i = 0; i < R; ++i)
     {
         expanded_key.round_keys[i] = picoutil_static_calloc(BSIZE, sizeof(aes_word_t));
         if (expanded_key.round_keys[i] == NULL)
@@ -339,7 +374,7 @@ static aes_key_expanded_t aes_key_schedule(aes_key_t key, ATTRIBUTE(unused) aes_
         }
         memcpy(expanded_key.round_keys[i], full_expanded_key + (i * BSIZE), BSIZE * sizeof(aes_word_t));
     }
-    expanded_key.round_count = picoutil_aes_round_count(key.key_size);
+    expanded_key.round_count = R - 1;
     return expanded_key;
 }
 
@@ -354,7 +389,8 @@ static inline void aes_key_expanded_free(aes_key_expanded_t key)
 }
 
 // This function is taken from Wikipedia example implementation
-static void aes_mul_column_by_poly(byte_t bytes[sizeof(aes_word_t)] /* r */)
+// https://en.wikipedia.org/wiki/Rijndael_MixColumns#Implementation_example (in C, with the C# version below it)
+static void aes_mul_column_by_poly(byte_t bytes[__min_size (sizeof(aes_word_t))] /* r */)
 {
     __unused static const byte_t poly[sizeof(aes_word_t)] = { 0x02, 0x01, 0x01, 0x03 };
     byte_t bytes_cpy[sizeof(aes_word_t)] = { 0 }; // a
@@ -374,7 +410,8 @@ static void aes_mul_column_by_poly(byte_t bytes[sizeof(aes_word_t)] /* r */)
     bytes[3] = b[3] ^ bytes_cpy[2] ^ bytes_cpy[1] ^ b[0] ^ bytes_cpy[0];
 }
 
-ATTRIBUTE(flatten)
+// Substitute bytes in a block using the AES S-box
+__flatten
 static inline aes_block_t aes_sub_bytes(aes_block_t block)
 {
     for (size_t i = 0; i < picoutil_aes_block_word_count(block.block_size); ++i)
@@ -382,25 +419,55 @@ static inline aes_block_t aes_sub_bytes(aes_block_t block)
     return block;
 }
 
-ATTRIBUTE(flatten)
+__flatten
+static inline void aes_shift_row_unit(byte_t bytes[__min_size (4)], size_t len)
+{
+    if (len == 4)
+    {
+        aes_word_t temp = aes_rot_word_right(*(aes_word_t*)bytes);
+        memcpy(bytes, &temp, sizeof(aes_word_t));
+    }
+    else
+    {
+        byte_t temparr[len];
+        memset(temparr, 0, sizeof(temparr));
+        temparr[0] = bytes[1];
+        temparr[1] = bytes[2];
+        temparr[2] = bytes[3];
+        temparr[3] = bytes[0];
+        bytes[0] = temparr[0];
+        bytes[1] = temparr[1];
+        bytes[2] = temparr[2];
+        bytes[3] = temparr[3];
+    }
+}
+
+__flatten
 static inline aes_block_t aes_shift_rows(aes_block_t block)
 {
-    for (size_t i = 0; i < picoutil_aes_block_word_count(block.block_size); ++i)
+    int wc = picoutil_aes_block_word_count(block.block_size);
+    if (UNLIKELY(wc < 4) || UNLIKELY(wc > 8))
+        return NULL_T(aes_block_t);
+    byte_t full_row[wc];
+    memset(full_row, 0, sizeof(full_row));
+    byte_t row[wc];
+    memset(row, 0, sizeof(row));
+    for (size_t i = 0; i < sizeof(aes_word_t); ++i)
     {
         GET_ROW(block, i, row);
-        aes_word_t full_row = 0;
-        memcpy(&full_row, row, sizeof(aes_word_t));
+        memcpy(&full_row, row, picoutil_aes_block_word_count(block.block_size));
         for (size_t j = 0; j < i; ++j)
-            full_row = aes_rot_word_right(full_row);
-        memcpy(row, &full_row, sizeof(aes_word_t));
+            aes_shift_row_unit(full_row, picoutil_aes_block_word_count(block.block_size));
+        memcpy(row, &full_row, picoutil_aes_block_word_count(block.block_size));
         SET_ROW(block, i, row);
+        memset(full_row, 0, picoutil_aes_block_word_count(block.block_size));
     }
     return block;
 }
 
 static inline aes_block_t aes_mix_columns(aes_block_t block)
 {
-    for (size_t i = 0; i < sizeof(aes_word_t); ++i)
+    for (size_t i = 0; i < picoutil_aes_block_word_count(block.block_size); ++i)
     {
         GET_COLUMN(block, i, column);
         aes_mul_column_by_poly(column);
@@ -424,6 +491,11 @@ static inline aes_block_t aes_add_round_key(aes_block_t block, aes_word_t* round
         memcpy(&block.block[i], bytes, sizeof(aes_word_t));
     }
     return block;
+}
+
+static inline aes_block_t aes_add_iv(aes_block_t block, aes_block_t iv)
+{
+    // TODO
 }
 
 static inline aes_block_t aes_prepare_entry(byte_t* entry, aes_block_t block)
@@ -615,7 +687,9 @@ end_of_opt:
             picoutil_static_free(ctx->key);
             return false;
         }
-        if ((*ctx->key_expanded = aes_key_schedule(*ctx->key, ctx->block_size)) == (aes_key_expanded_t) { 0 })
+        *ctx->key_expanded = aes_key_schedule(*ctx->key, ctx->block_size);
+        const aes_key_expanded_t null_keys = NULL_T(aes_key_expanded_t);
+        if (memcmp(&(ctx->key_expanded), &null_keys, sizeof(aes_key_expanded_t)) == 0)
         {
             if (ctx->iv != NULL)
             {
@@ -665,7 +739,6 @@ void picoutil_aes_context_deinit(aes_context_t* ctx)
 static aes_user_data_t aes_split_bytes(byte_t* bytes, size_t bytes_count, aes_block_size bsize)
 {
     aes_user_data_t data = { 0 };
-    data.block_size = bsize;
     divmod_result_t divmod = DIVMODu32(bytes_count, sizeof(aes_word_t) * picoutil_aes_block_word_count(bsize));
     data.block_count = to_quotient_u32(divmod) + (to_remainder_u32(divmod) > 0 ? 1 : 0);
     data.blocks = picoutil_static_calloc_aligned(data.block_count, sizeof(aes_block_t), alignof(aes_block_t));
@@ -695,8 +768,8 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
     
     aes_key_t opt_key = { 0 };
     aes_block_t opt_iv = { 0 };
-    aes_key_expanded_t* actual_keys = NULL;
-    aes_block_t* actual_iv = NULL;
+    aes_key_expanded_t actual_keys = NULL_T(aes_key_expanded_t);
+    aes_block_t actual_iv = NULL_T(aes_block_t);
     void* opt_key_ptr = NULL;
     void* opt_iv_ptr = NULL;
     va_list args;
@@ -722,6 +795,46 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
 end_of_opt:
     va_end(args);
 
+    if (opt_key_ptr != NULL)
+    {
+        actual_keys = aes_key_schedule(opt_key, ctx->block_size);
+        const aes_key_expanded_t null_keys = NULL_T(aes_key_expanded_t);
+        if (memcmp(&actual_keys, &null_keys, sizeof(aes_key_expanded_t)) == 0)
+            return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+    }
+    else
+        actual_keys = *ctx->key_expanded;
+    if (opt_iv_ptr != NULL)
+        actual_iv = opt_iv;
+    else
+        actual_iv = *ctx->iv;
+
+    aes_user_data_t user_data = aes_split_bytes(data, data_size, ctx->block_size);
+    if (user_data.blocks == NULL)
+        return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+    for (size_t i = 0; i < user_data.block_count; ++i)
+    {
+        switch (ctx->mode)
+        {
+            case AES_MODE_ECB:
+                if (ctx->dir == AES_DIR_ENCRYPT)
+                    user_data.blocks[i] = (TYPEOF(user_data.blocks[i])){ 0 }; // aes_encrypt_ecb(user_data.blocks[i], actual_keys);
+                else
+                    user_data.blocks[i] = (TYPEOF(user_data.blocks[i])){ 0 }; // es_decrypt_ecb(user_data.blocks[i], actual_keys);
+                break;
+            case AES_MODE_CBC:
+                __unreachable(/* UNIMPLEMENTED */);
+                break;
+            case AES_MODE_CTR:
+                __unreachable(/* UNIMPLEMENTED */);
+                break;
+            /* Other cases go here too */
+            default:
+                __unreachable(/* UNIMPLEMENTED */);
+                break;
+        }
+    }
+    // TODO: Just finish this
 }
 
 aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, aes_key_t key)
@@ -729,9 +842,6 @@ aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, 
     aes_key_expanded_t expanded_key = aes_key_schedule(key, block.block_size);
     if (expanded_key.round_keys == NULL)
     {
-        recursive_mutex_enter_blocking(&aes_error_mutex);
-        aes_error = true;
-        recursive_mutex_exit(&aes_error_mutex);
         return block;
     }
     block = aes_add_round_key(block, expanded_key.round_keys[0]);
@@ -754,9 +864,6 @@ aes_block_t __time_critical_func(picoutil_aes_encrypt_block_until)(aes_block_t b
     aes_key_expanded_t expanded_key = aes_key_schedule(key, block.block_size);
     if (expanded_key.round_keys == NULL)
     {
-        recursive_mutex_enter_blocking(&aes_error_mutex);
-        aes_error = true;
-        recursive_mutex_exit(&aes_error_mutex);
         return block;
     }
     void print_block(aes_block_t block);
@@ -815,10 +922,16 @@ ret:
 
 void print_block(aes_block_t block)
 {
-    for (size_t i = 0; i < picoutil_aes_block_word_count(block.block_size); ++i)
+    int wc = picoutil_aes_block_word_count(block.block_size);
+    if (wc < 0)
+        printf("Invalid block size\n");
+    byte_t* row = __calloca_aligned(wc, sizeof(byte_t), 8);
+    if (row == NULL)
+        return;
+    for (size_t i = 0; i < sizeof(aes_word_t); ++i)
     {
         GET_ROW(block, i, row);
-        for (size_t j = 0; j < sizeof(aes_word_t); ++j)
+        for (size_t j = 0; j < picoutil_aes_block_word_count(block.block_size); ++j)
             printf("%" PRIx8 " ", row[j]);
         puts("");
     }

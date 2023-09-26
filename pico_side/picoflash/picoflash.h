@@ -38,6 +38,28 @@
 #include <stdbool.h>
 #include <signal.h>
 
+typedef struct picoflash_fs picoflash_fs_t;
+
+#ifndef PICOFLASH_FS_START
+    #warning "PICOFLASH_FS_START must be defined"
+    #define PICOFLASH_FS_START 0
+#endif
+#ifndef PICOFLASH_FS_END
+    #warning "PICOFLASH_FS_END must be defined"
+    #define PICOFLASH_FS_END 0
+#endif
+
+#define PICOFLASH_FS_MAGIC ((uint8_t[11]){'p', 'I', 'c', 'O', 'f', 'L', 'a', 'S', 'h', 'F', 's'})
+#define PICOFLASH_FS_VERSION ((uint8_t[5]){'0', '.', '1', '.', '0'})
+#define PICOFLASH_FS_ALIGN 4
+#define PICOFLASH_FS_OFFSET (PICOFLASH_FS_START + (PICOFLASH_FS_START % PICOFLASH_FS_ALIGN))
+
+struct picoflash_fs
+{
+    uint8_t magic[11]; // "pIcOfLaShFs"
+    uint8_t version[5]; // "0.1.0" (for example)
+};
+
 static inline
 uint32_t picoflash_disable_interrupts(void)
 {

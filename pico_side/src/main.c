@@ -1,3 +1,5 @@
+#define PICOUTIL_TEST
+
 #include <picoutil.h>
 
 #include "../aes_test/aes.h"
@@ -9,7 +11,9 @@
 #include <pico/sync.h>
 #include <pico/bootrom.h>
 #include <pico/double.h>
-
+#include <hardware/clocks.h>
+#include <hardware/xosc.h>
+#include <hardware/pll.h>
 
 #include <stdint.h>
 #include <stddef.h>
@@ -83,9 +87,98 @@ static void aes_mul_column_by_poly(byte_t bytes[sizeof(aes_word_t)] /* r */)
 }
 #endif
 
+void set_sysclock_to_xosc(uint32_t freq)
+{
+    xosc_init();
+    clocks_init();
+    uint32_t current_xosc_freq = XOSC_MHZ * MHZ;
+    if (clock_configure(clk_ref, CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC, 0, current_xosc_freq, current_xosc_freq) != true)
+        while (true)
+            printf("Failed to configure clk_ref\n");
+    if (clock_configure(clk_sys, CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLK_REF, 0, current_xosc_freq, current_xosc_freq) != true)
+        while (true)
+            printf("Failed to configure clk_sys\n");
+    uint params[3] = { 0 };
+    uint32_t wanted = freq;
+    while (freq != 0 && !check_sys_clock_khz(freq, &(params[0]), &(params[1]), &(params[2])))
+        freq -= 100;
+    if (freq == 0)
+    {
+        while (true)
+            printf("Failed to find a valid clock frequency\n");
+        return;
+    }
+    if (freq != wanted)
+        printf("Warning: Could not set system clock to %" PRIu32 "KHz, setting to %" PRIu32 "KHz instead\n", wanted, freq);
+    else
+        printf("Successfully set system clock to %" PRIu32 "KHz\n", freq);
+    set_sys_clock_pll(params[0], params[1], params[2]);
+    /* clock_configure(clk_sys, freq, xosc_get_rate_hz()); */
+}
+
+void print_clocks(void)
+{
+    uint32_t clk_gpout0_freq = clock_get_hz(clk_gpout0);
+    uint32_t clk_gpout1_freq = clock_get_hz(clk_gpout1);
+    uint32_t clk_gpout2_freq = clock_get_hz(clk_gpout2);
+    uint32_t clk_gpout3_freq = clock_get_hz(clk_gpout3);
+    uint32_t clk_ref_freq = clock_get_hz(clk_ref);
+    uint32_t clk_sys_freq = clock_get_hz(clk_sys);
+    uint32_t clk_peri_freq = clock_get_hz(clk_peri);
+    uint32_t clk_usb_freq = clock_get_hz(clk_usb);
+    uint32_t clk_adc_freq = clock_get_hz(clk_adc);
+    uint32_t clk_rtc_freq = clock_get_hz(clk_rtc);
+    io_rw_32 xosc_status = xosc_hw->status;
+    // Crystal Oscillator Status
+    // 0x80000000 [31]    : STABLE (0): Oscillator is running and stable
+    // 0x01000000 [24]    : BADWRITE (0): An invalid value has been written to CTRL_ENABLE or CTRL_FREQ_RANGE or DORMANT
+    // 0x00001000 [12]    : ENABLED (0): Oscillator is enabled but not necessarily running and stable, resets to 0
+    // 0x00000003 [1:0]   : FREQ_RANGE (0): The current frequency range setting, always reads 0
+    bool is_xosc_active = (xosc_status & XOSC_STATUS_ENABLED_BITS);
+    bool is_xosc_stable = (xosc_status & XOSC_STATUS_STABLE_BITS);
+    
+    printf("clk_gpout0: %" PRIu32 "Hz\n", clk_gpout0_freq);
+    printf("clk_gpout1: %" PRIu32 "Hz\n", clk_gpout1_freq);
+    printf("clk_gpout2: %" PRIu32 "Hz\n", clk_gpout2_freq);
+    printf("clk_gpout3: %" PRIu32 "Hz\n", clk_gpout3_freq);
+    printf("clk_ref: %" PRIu32 "Hz\n", clk_ref_freq);
+    printf("clk_sys: %" PRIu32 "Hz\n", clk_sys_freq);
+    printf("clk_peri: %" PRIu32 "Hz\n", clk_peri_freq);
+    printf("clk_usb: %" PRIu32 "Hz\n", clk_usb_freq);
+    printf("clk_adc: %" PRIu32 "Hz\n", clk_adc_freq);
+    printf("clk_rtc: %" PRIu32 "Hz\n", clk_rtc_freq);
+    printf("is_xosc_active: %s\n", is_xosc_active ? "true" : "false");
+    printf("is_xosc_stable: %s\n", is_xosc_stable ? "true" : "false");
+}
+
+
+/* clk_gpout0: 0Hz */
+/* clk_gpout1: 0Hz */
+/* clk_gpout2: 0Hz */
+/* clk_gpout3: 0Hz */
+/* clk_ref: 12000000Hz */
+/* clk_sys: 125000000Hz */
+/* clk_peri: 125000000Hz */
+/* clk_usb: 48000000Hz */
+/* clk_adc: 48000000Hz */
+/* clk_rtc: 46875Hz */
+
+/* clk_gpout0: 0Hz */
+/* clk_gpout1: 0Hz */
+/* clk_gpout2: 0Hz */
+/* clk_gpout3: 0Hz */
+/* clk_ref: 12000000Hz */
+/* clk_sys: 125000000Hz */
+/* clk_peri: 125000000Hz */
+/* clk_usb: 48000000Hz */
+/* clk_adc: 48000000Hz */
+/* clk_rtc: 46875Hz */
+
 int main(void)
 {
+    /* clocks_init(); */
     stdio_init_all();
+    /* set_sysclock_to_xosc(48 * MHZ); */
     picoutil_static_allocator_init(true);
     uint32_t i = 1;
     uint32_t j = UINT32_C(123456789);
@@ -99,6 +192,7 @@ int main(void)
     while (true)
     {
         char c = getchar();
+        print_clocks();
         /* picoutil_static_allocator_memdump((uintptr_t[]){ 0, 24 }); */
         /* picoutil_static_allocator_dump_hdrs(); */
         if (c == 'q')
@@ -111,7 +205,7 @@ int main(void)
         printf("%" PRIu32 " with digits rotated to the left by %" PRIu32 " == %" PRIu32 "\n", j, MODu32(counter, DIGIT_COUNT(j)), ROL_DIGITS(j, MODu32(counter, DIGIT_COUNT(j))));
         printf("%" PRIu32 " with digits rotated to the right by %" PRIu32 " == %" PRIu32 "\n\n", j, MODu32(counter, DIGIT_COUNT(j)), ROR_DIGITS(j, MODu32(counter, DIGIT_COUNT(j))));
         ++counter;
-        int arr[] = { 1, 2, 3, 4, 5 };
+        uint32_t arr[] = { 1, 2, 3, 4, 5 };
         for (size_t i = 0; i < count_of(arr); ++i)
             printf("%d ", arr[i]);
         picoutil_memset_explicit(arr, 1, sizeof(arr));
@@ -123,7 +217,7 @@ int main(void)
         for (size_t i = 0; i < count_of(arr); ++i)
             printf("%d ", arr[i]);
         printf("\n");
-
+        
 #if 0
         byte_t test_vec1[] = { 219, 19, 83, 69 };
         byte_t test_vec2[] = { 242, 10, 34, 92 };
