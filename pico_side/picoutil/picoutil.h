@@ -588,6 +588,40 @@
 
 BEGIN_DECLS
 
+#ifdef powint
+    #undef powint
+#endif
+#define powint(X, Y)        \
+    _Generic((X),           \
+        uint8_t: powu8,     \
+        uint16_t: powu16,   \
+        uint32_t: powu32,   \
+        uint64_t: powu64,   \
+        int8_t: pows8,      \
+        int16_t: pows16,    \
+        int32_t: pows32,    \
+        int64_t: pows64,    \
+        default: pow        \
+    )((X), (Y))
+
+__const
+static uint8_t powu8(uint8_t base, uint8_t exp);
+__const
+static uint16_t powu16(uint16_t base, uint16_t exp);
+__const
+static uint32_t powu32(uint32_t base, uint32_t exp);
+__const
+static int8_t pows8(int8_t base, uint8_t exp);
+__const
+static int16_t pows16(int16_t base, uint16_t exp);
+__const
+static int32_t pows32(int32_t base, uint32_t exp);
+
+__const
+uint64_t powu64(uint64_t base, uint64_t exp);
+__const
+int64_t pows64(int64_t base, uint64_t exp);
+
 typedef uint8_t byte_t;
 
 // #define byte_t __buffer_type byte_t
@@ -1338,6 +1372,202 @@ END_DECLS
     })
 // Rotate the digits to the right instead of the bits
 #define ROR_DIGITS(X, Y) ROL_DIGITS((X), (MODu32((DIGIT_COUNT(X) - (Y)), DIGIT_COUNT(X))))
+
+#ifdef HW_DIVMODs32
+    #undef HW_DIVMODs32
+#endif
+#ifdef HW_MODs32
+    #undef HW_MODs32
+#endif
+#ifdef HW_DIVs32
+    #undef HW_DIVs32
+#endif
+#ifdef DIVMODs32
+    #undef DIVMODs32
+#endif
+#ifdef MODs32
+    #undef MODs32
+#endif
+#ifdef DIVs32
+    #undef DIVs32
+#endif
+#define HW_DIVMODs32(X, Y) ((divmod_result_t) hw_divider_divmod_s32((int32_t)(X), (int32_t)(Y)))
+#define HW_MODs32(X, Y) ((int32_t) hw_divider_s32_remainder((int32_t)(X), (int32_t)(Y)))
+#define HW_DIVs32(X, Y) ((int32_t) hw_divider_s32_quotient((int32_t)(X), (int32_t)(Y)))
+#define DIVMODs32(X, Y) __builtin_choose_expr(  \
+    __builtin_constant_p((X) / (Y)) &&          \
+    __builtin_constant_p((X) % (Y)),            \
+    DIVMOD_RAW((X), (Y)),                       \
+    HW_DIVMODs32((X), (Y))                      \
+)
+#define MODs32(X, Y) __builtin_choose_expr( \
+    __builtin_constant_p((X) % (Y)),        \
+    ((X) % (Y)),                            \
+    HW_MODs32((X), (Y))                     \
+)
+#define DIVs32(X, Y) __builtin_choose_expr( \
+    __builtin_constant_p((X) / (Y)),        \
+    ((X) / (Y)),                            \
+    HW_DIVs32((X), (Y))                     \
+)
+
+BEGIN_DECLS
+
+__const
+static uint8_t powu8(uint8_t base, uint8_t exp)
+{
+    if (exp == 0 && base == 0)
+        return 0;
+    if (exp == 0)
+        return 1;
+    if (exp == 1)
+        return base;
+    if (MODu32(exp, 2) == 0)
+        return powu8(MUL(base, base), DIVu32(exp, 2));
+    else
+        return MUL(base, powu8(MUL(base, base), DIVu32(exp - 1, 2)));
+}
+
+__const
+static uint16_t powu16(uint16_t base, uint16_t exp)
+{
+    if (exp == 0 && base == 0)
+        return 0;
+    if (exp == 0)
+        return 1;
+    if (exp == 1)
+        return base;
+    if (MODu32(exp, 2) == 0)
+        return powu16(MUL(base, base), DIVu32(exp, 2));
+    else
+        return MUL(base, powu16(MUL(base, base), DIVu32(exp - 1, 2)));
+}
+
+__const
+static uint32_t powu32(uint32_t base, uint32_t exp)
+{
+    if (exp == 0 && base == 0)
+        return 0;
+    if (exp == 0)
+        return 1;
+    if (exp == 1)
+        return base;
+    if (MODu32(exp, 2) == 0)
+        return powu32(MUL(base, base), DIVu32(exp, 2));
+    else
+        return MUL(base, powu32(MUL(base, base), DIVu32(exp - 1, 2)));
+}
+
+__const
+static int8_t pows8(int8_t base, int8_t exp)
+{
+    if (exp == 0 && base == 0)
+        return 0;
+    if (exp == 0)
+        return 1;
+    if (exp == 1)
+        return base;
+    if (MODs32(exp, 2) == 0)
+        return pows8(MUL(base, base), DIVs32(exp, 2));
+    else
+        return MUL(base, pows8(MUL(base, base), DIVs32(exp - 1, 2)));
+}
+
+__const
+static int16_t pows16(int16_t base, int16_t exp)
+{
+    if (exp == 0 && base == 0)
+        return 0;
+    if (exp == 0)
+        return 1;
+    if (exp == 1)
+        return base;
+    if (MODs32(exp, 2) == 0)
+        return pows16(MUL(base, base), DIVs32(exp, 2));
+    else
+        return MUL(base, pows16(MUL(base, base), DIVs32(exp - 1, 2)));
+}
+
+__const
+static int32_t pows32(int32_t base, int32_t exp)
+{
+    if (exp == 0 && base == 0)
+        return 0;
+    if (exp == 0)
+        return 1;
+    if (exp == 1)
+        return base;
+    if (MODs32(exp, 2) == 0)
+        return pows32(MUL(base, base), DIVs32(exp, 2));
+    else
+        return MUL(base, pows32(MUL(base, base), DIVs32(exp - 1, 2)));
+}
+
+__const __always_inline
+static inline int32_t gcd_s32(int32_t a, int32_t b)
+{
+    if (a == 0)
+        return b;
+    return gcd_s32(MODs32(b, a), a);
+}
+
+typedef struct rational
+{
+    int32_t numerator;
+    int32_t denominator;
+} rational_t;
+
+__const __always_inline
+static inline rational_t rational_simplify(rational_t r)
+{
+    int32_t gcd = gcd_s32(r.numerator, r.denominator);
+    return rational(DIVs32(r.numerator, gcd), DIVs32(r.denominator, gcd));
+}
+
+__const __always_inline
+static inline rational_t rational(int32_t numerator, int32_t denominator)
+{
+    return rational_simplify((rational_t) { numerator, denominator });
+}
+
+__const __always_inline
+static inline rational_t rational_add(rational_t a, rational_t b)
+{
+    return rational(MUL(a.numerator, b.denominator) + MUL(b.numerator, a.denominator), MUL(a.denominator, b.denominator));
+}
+
+__const __always_inline
+static inline rational_t rational_sub(rational_t a, rational_t b)
+{
+    return rational(MUL(a.numerator, b.denominator) - MUL(b.numerator, a.denominator), MUL(a.denominator, b.denominator));
+}
+
+__const __always_inline
+static inline rational_t rational_mul(rational_t a, rational_t b)
+{
+    return rational(MUL(a.numerator, b.numerator), MUL(a.denominator, b.denominator));
+}
+
+__const __always_inline
+static inline rational_t rational_div(rational_t a, rational_t b)
+{
+    return rational(MUL(a.numerator, b.denominator), MUL(a.denominator, b.numerator));
+}
+
+__const __always_inline
+static inline rational_t rational_pow(rational_t a, int32_t b)
+{
+    return rational(powint(a.numerator, b), powint(a.denominator, b));
+}
+
+__const
+static inline float rational_to_float(rational_t r)
+{
+    // TODO: Try to find a better way to do this
+    return (float) r.numerator / (float) r.denominator;
+}
+
+END_DECLS
 
 #endif
 
