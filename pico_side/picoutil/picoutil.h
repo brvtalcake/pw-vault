@@ -58,8 +58,8 @@
 #ifdef ATTRIBUTE_WITH_PARAMS
     #undef ATTRIBUTE_WITH_PARAMS
 #endif
-#define ATTRIBUTE(X) __attribute__((PP_CAT(__, PP_CAT(X, __))))
-#define ATTRIBUTE_WITH_PARAMS(X, ...) __attribute__((PP_CAT(__, PP_CAT(X, __))(__VA_ARGS__)))
+#define ATTRIBUTE(X) __attribute__((PP_CAT(__, X, __)))
+#define ATTRIBUTE_WITH_PARAMS(X, ...) __attribute__((PP_CAT(__, X, __)(__VA_ARGS__)))
 
 #ifndef UNLIKELY
     #define UNLIKELY(X) __builtin_expect(BIT(X), false)
@@ -193,6 +193,9 @@
 #ifndef __fmtfunc
     #define __fmtfunc(FUNCLIKE, FORMAT_INDEX, FIRST_TO_CHECK) ATTRIBUTE_WITH_PARAMS(format, PP_CAT(__, PP_CAT(FUNCLIKE, __)), FORMAT_INDEX, FIRST_TO_CHECK)
 #endif
+#ifndef __printflike
+    #define __printflike(FORMAT_INDEX, FIRST_TO_CHECK) __fmtfunc(printf, FORMAT_INDEX, FIRST_TO_CHECK)
+#endif
 #ifndef __pure
     #define __pure ATTRIBUTE(pure)
 #endif
@@ -201,8 +204,7 @@
 #endif
 #define __const ATTRIBUTE(const)
 #ifndef __noreturn
-    #include <stdnoreturn.h>
-    #define __noreturn noreturn
+    #define __noreturn ATTRIBUTE(noreturn)
 #endif
 #ifndef __deprecated
     #define __deprecated ATTRIBUTE(deprecated)
@@ -222,19 +224,19 @@
 // Useless macro for this project since raspberry pi pico doesn't support shared libraries
 #ifndef __symver
     #ifdef __ELF__
-        #define __symver(SYMBOL, ISDEFAULT, LIBNAME, VERSTR)                                                    \
-            CHAOS_PP_VARIADIC_IF(CHAOS_PP_BOOL(ISDEFAULT))                                                      \
-            (                                                                                                   \
-                ATTRIBUTE_WITH_PARAMS(                                                                          \
-                    symver,                                                                                     \
-                    STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, CHAOS_PP_PUSH(@, LIBNAME))), _) VERSTR     \
-                )                                                                                               \
-            )                                                                                                   \
-            (                                                                                                   \
-                ATTRIBUTE_WITH_PARAMS(                                                                          \
-                    symver,                                                                                     \
-                    STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, LIBNAME)), _) VERSTR                       \
-                )                                                                                               \
+        #define __symver(SYMBOL, ISDEFAULT, LIBNAME, MAJV, MINV, REV)                                                       \
+            CHAOS_PP_VARIADIC_IF(CHAOS_PP_BOOL(ISDEFAULT))                                                                  \
+            (                                                                                                               \
+                ATTRIBUTE_WITH_PARAMS(                                                                                      \
+                    symver,                                                                                                 \
+                    STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, CHAOS_PP_PUSH(@, LIBNAME))), _, MAJV, _, MINV, _, REV) \
+                )                                                                                                           \
+            )                                                                                                               \
+            (                                                                                                               \
+                ATTRIBUTE_WITH_PARAMS(                                                                                      \
+                    symver,                                                                                                 \
+                    STRCATIFY(CHAOS_PP_PUSH(SYMBOL, CHAOS_PP_PUSH(@, LIBNAME)), _, MAJV, _, MINV, _, REV)                   \
+                )                                                                                                           \
             )
     #else
         #define __symver(SYMBOL, ISDEFAULT, LIBNAME, VERSTR)
@@ -294,8 +296,8 @@
 #ifndef __mk_alias
     #define __mk_alias(ALIAS, TARGET) ATTRIBUTE_WITH_PARAMS(alias, STRINGIFY(TARGET)) __copy_attr(ALIAS) ALIAS
 #endif
-#ifndef __buffer_type
-    #define __buffer_type ATTRIBUTE(nonstring)
+#ifndef __buffer_var
+    #define __buffer_var ATTRIBUTE(nonstring)
 #endif
 #ifndef __cleanup
     #define __cleanup(FUNC) ATTRIBUTE_WITH_PARAMS(cleanup, FUNC)
@@ -512,6 +514,11 @@
 #endif
 #define TUPLE(...) ( MAP_LIST(IDENTITY, __VA_ARGS__) )
 
+#ifdef TUPLE_PRIMITIVE
+    #undef TUPLE_PRIMITIVE
+#endif
+#define TUPLE_PRIMITIVE(...) ( IDENTITY(__VA_ARGS__) )
+
 #ifdef TUPLE_WITH
     #undef TUPLE_WITH
 #endif
@@ -588,10 +595,12 @@
 
 BEGIN_DECLS
 
-#ifdef powint
-    #undef powint
+#include <pico/double.h>
+
+#ifdef intpow
+    #undef intpow
 #endif
-#define powint(X, Y)        \
+#define intpow(X, Y)        \
     _Generic((X),           \
         uint8_t: powu8,     \
         uint16_t: powu16,   \
@@ -601,8 +610,10 @@ BEGIN_DECLS
         int16_t: pows16,    \
         int32_t: pows32,    \
         int64_t: pows64,    \
-        default: pow        \
+        default: powint     \
     )((X), (Y))
+
+#include <tgmath.h>
 
 __const
 static uint8_t powu8(uint8_t base, uint8_t exp);
@@ -611,20 +622,20 @@ static uint16_t powu16(uint16_t base, uint16_t exp);
 __const
 static uint32_t powu32(uint32_t base, uint32_t exp);
 __const
-static int8_t pows8(int8_t base, uint8_t exp);
+static int8_t pows8(int8_t base, int8_t exp);
 __const
-static int16_t pows16(int16_t base, uint16_t exp);
+static int16_t pows16(int16_t base, int16_t exp);
 __const
-static int32_t pows32(int32_t base, uint32_t exp);
+static int32_t pows32(int32_t base, int32_t exp);
 
 __const
 uint64_t powu64(uint64_t base, uint64_t exp);
 __const
-int64_t pows64(int64_t base, uint64_t exp);
+int64_t pows64(int64_t base, int64_t exp);
 
 typedef uint8_t byte_t;
 
-// #define byte_t __buffer_type byte_t
+// #define byte_t __buffer_var byte_t
 
 void      picoutil_static_allocator_init(bool safe);
 bool      picoutil_static_allocator_set_safe(bool safe);
@@ -1009,8 +1020,6 @@ typedef struct aes_key
 
 typedef struct aes_key_expanded
 {
-    /* VECTOR(pico_aes_round_count(key_size), 16) */
-    /* byte_t** round_keys; */
     aes_word_t** round_keys;
     size_t round_count;
 } aes_key_expanded_t;
@@ -1041,13 +1050,18 @@ typedef struct aes_result
 
 void picoutil_aes_init(void);
 
+__zero_used_regs
 bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size_t bufsize);
+__zero_used_regs
+void picoutil_aes_key_destroy(aes_key_t* key);
 __sentinel __zero_used_regs
 bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir dir, aes_key_size key_size, aes_block_size block_size, ...);
 #ifdef picoutil_aes_context_init
     #undef picoutil_aes_context_init
 #endif
+
 /**
+ * @fn bool picoutil_aes_context_init(aes_context_t* ctx, aes_mode mode, aes_dir dir, aes_key_size key_size, aes_block_size block_size, ...)
  * @brief Initialize an AES context
  * @param CTX The context pointer to initialize
  * @param MODE The mode of operation
@@ -1058,7 +1072,15 @@ bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir d
  * @return true if the context was initialized successfully, false otherwise
  * @note The key and IV are copied to the context, so they can be freed after the call. They are assumed to be of type `aes_key_t*` and `aes_block_t*`, respectively
  */
-#define picoutil_aes_context_init(CTX, MODE, DIR, KEY_SIZE, BLOCK_SIZE, ...) aes_context_init_impl((CTX), (MODE), (DIR), (KEY_SIZE), (BLOCK_SIZE), __VA_ARGS__, NULL)
+#define picoutil_aes_context_init(CTX, MODE, DIR, KEY_SIZE, BLOCK_SIZE, ...) picoutil_aes_context_init_impl((CTX), (MODE), (DIR), (KEY_SIZE), (BLOCK_SIZE), __VA_ARGS__, NULL)
+
+/**
+ * @fn void picoutil_aes_context_deinit(aes_context_t* ctx)
+ * @brief Deinitialize an AES context
+ * @param ctx The context pointer to deinitialize
+ * @note Every freeable fields are freed
+ */
+__zero_used_regs
 void picoutil_aes_context_deinit(aes_context_t* ctx);
 
 __wur __sentinel __zero_used_regs
@@ -1075,12 +1097,23 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
  * @return The processed data
  * @note The optional key and IV are not copied to the context and are priviledged over the ones in the context if any. They are assumed to be of type `aes_key_t*` and `aes_block_t*`, respectively
  */
-#define picoutil_aes_process(CTX, DATA, DATA_SIZE, ...) picoutil_aes_process_impl((CTX), (DATA), (DATA_SIZE), __VA_ARGS__, NULL)
+#define picoutil_aes_process(CTX, DATA, DATA_SIZE, ...) picoutil_aes_process_impl((CTX), (DATA), (DATA_SIZE), CHAOS_PP_VARIADIC_IF(IS_EMPTY(__VA_ARGS__))(NULL)(ENCLOSE_ALL_WITH_PARENS(__VA_ARGS__), NULL))
+
+/**
+ * @fn void picoutil_aes_result_destroy(aes_result_t* result)
+ * @brief Destroys the structure returned by `picoutil_aes_process`
+ * @param result The result to free
+ * @warning A structure returned by `picoutil_aes_process` shall always be freed by this function as soon as it is not needed anymore
+ */
+__zero_used_regs
+void picoutil_aes_result_destroy(aes_result_t* result);
 // aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, aes_key_t key);
 // aes_block_t __time_critical_func(picoutil_aes_encrypt_block_until)(aes_block_t block, aes_key_t key, size_t num_round);
 
 __zero_used_regs
 void picoutil_test_encryption_ecb_mode(size_t num_rounds);
+__zero_used_regs
+void test_aes_encrypt_decrypt_ecb(void);
 
 END_DECLS
 
@@ -1342,7 +1375,7 @@ END_DECLS
                  PP_CAT(i_, __LINE__) < PP_CAT(dig_count_, __LINE__);                                                                   \
                  PP_CAT(i_, __LINE__)++)                                                                                                \
             {                                                                                                                           \
-                PP_CAT(ret_, __LINE__) += MUL(PP_CAT(x_digits_, __LINE__)[PP_CAT(i_, __LINE__)], powint(10.0, PP_CAT(i_, __LINE__)));   \
+                PP_CAT(ret_, __LINE__) += MUL(PP_CAT(x_digits_, __LINE__)[PP_CAT(i_, __LINE__)], intpow(10.0, PP_CAT(i_, __LINE__)));   \
             }                                                                                                                           \
         }                                                                                                                               \
         else                                                                                                                            \
@@ -1365,7 +1398,7 @@ END_DECLS
                  PP_CAT(i_, __LINE__) < PP_CAT(dig_count_, __LINE__);                                                                   \
                  PP_CAT(i_, __LINE__)++)                                                                                                \
             {                                                                                                                           \
-                PP_CAT(ret_, __LINE__) += MUL(PP_CAT(x_digits_, __LINE__)[PP_CAT(i_, __LINE__)], powint(10.0, PP_CAT(i_, __LINE__)));   \
+                PP_CAT(ret_, __LINE__) += MUL(PP_CAT(x_digits_, __LINE__)[PP_CAT(i_, __LINE__)], intpow(10.0, PP_CAT(i_, __LINE__)));   \
             }                                                                                                                           \
         }                                                                                                                               \
         PP_CAT(ret_, __LINE__);                                                                                                         \
@@ -1392,8 +1425,8 @@ END_DECLS
     #undef DIVs32
 #endif
 #define HW_DIVMODs32(X, Y) ((divmod_result_t) hw_divider_divmod_s32((int32_t)(X), (int32_t)(Y)))
-#define HW_MODs32(X, Y) ((int32_t) hw_divider_s32_remainder((int32_t)(X), (int32_t)(Y)))
-#define HW_DIVs32(X, Y) ((int32_t) hw_divider_s32_quotient((int32_t)(X), (int32_t)(Y)))
+#define HW_MODs32(X, Y) ((int32_t) hw_divider_remainder_s32((int32_t)(X), (int32_t)(Y)))
+#define HW_DIVs32(X, Y) ((int32_t) hw_divider_quotient_s32((int32_t)(X), (int32_t)(Y)))
 #define DIVMODs32(X, Y) __builtin_choose_expr(  \
     __builtin_constant_p((X) / (Y)) &&          \
     __builtin_constant_p((X) % (Y)),            \
@@ -1461,7 +1494,7 @@ static uint32_t powu32(uint32_t base, uint32_t exp)
 __const
 static int8_t pows8(int8_t base, int8_t exp)
 {
-    if (exp == 0 && base == 0)
+    if ((exp == 0 && base == 0) || exp < 0)
         return 0;
     if (exp == 0)
         return 1;
@@ -1476,7 +1509,7 @@ static int8_t pows8(int8_t base, int8_t exp)
 __const
 static int16_t pows16(int16_t base, int16_t exp)
 {
-    if (exp == 0 && base == 0)
+    if ((exp == 0 && base == 0) || exp < 0)
         return 0;
     if (exp == 0)
         return 1;
@@ -1491,7 +1524,7 @@ static int16_t pows16(int16_t base, int16_t exp)
 __const
 static int32_t pows32(int32_t base, int32_t exp)
 {
-    if (exp == 0 && base == 0)
+    if ((exp == 0 && base == 0) || exp < 0)
         return 0;
     if (exp == 0)
         return 1;
@@ -1521,7 +1554,7 @@ __const __always_inline
 static inline rational_t rational_simplify(rational_t r)
 {
     int32_t gcd = gcd_s32(r.numerator, r.denominator);
-    return rational(DIVs32(r.numerator, gcd), DIVs32(r.denominator, gcd));
+    return (rational_t) { DIVs32(r.numerator, gcd), DIVs32(r.denominator, gcd) };
 }
 
 __const __always_inline
@@ -1557,7 +1590,7 @@ static inline rational_t rational_div(rational_t a, rational_t b)
 __const __always_inline
 static inline rational_t rational_pow(rational_t a, int32_t b)
 {
-    return rational(powint(a.numerator, b), powint(a.denominator, b));
+    return rational(intpow(a.numerator, b), intpow(a.denominator, b));
 }
 
 __const
@@ -1566,6 +1599,68 @@ static inline float rational_to_float(rational_t r)
     // TODO: Try to find a better way to do this
     return (float) r.numerator / (float) r.denominator;
 }
+
+END_DECLS
+
+#include CHAOS_PP_PLACEHOLDERS(0)
+#ifdef _ARG16
+    #undef _ARG16
+#endif
+#define _ARG16(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, ...) _15
+
+#ifdef HAS_COMMA
+    #undef HAS_COMMA
+#endif
+#define HAS_COMMA(...) _ARG16(__VA_ARGS__, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0)
+
+#ifdef _TRIGGER_PARENTHESIS_
+    #undef _TRIGGER_PARENTHESIS_
+#endif
+#define _TRIGGER_PARENTHESIS_(...) ,
+
+#ifdef IS_EMPTY
+    #undef IS_EMPTY
+#endif
+#define IS_EMPTY(...)                                                   \
+    _ISEMPTY(                                                           \
+          HAS_COMMA(__VA_ARGS__),                                       \
+          HAS_COMMA(_TRIGGER_PARENTHESIS_ __VA_ARGS__),                 \
+          HAS_COMMA(__VA_ARGS__ (/*empty*/)),                           \
+          HAS_COMMA(_TRIGGER_PARENTHESIS_ __VA_ARGS__ (/*empty*/))      \
+    )
+
+#ifdef _ISEMPTY
+    #undef _ISEMPTY
+#endif
+#define _ISEMPTY(_0, _1, _2, _3) HAS_COMMA(PP_CAT(_IS_EMPTY_CASE_, _0, _1, _2, _3))
+
+#ifdef _IS_EMPTY_CASE_0001
+    #undef _IS_EMPTY_CASE_0001
+#endif
+#define _IS_EMPTY_CASE_0001 ,
+
+#include CHAOS_PP_PLACEHOLDERS(1)
+
+#ifdef ENCLOSE_ALL_WITH_PARENS
+    #undef ENCLOSE_ALL_WITH_PARENS
+#endif
+#define ENCLOSE_ALL_WITH_PARENS(...) CHAOS_PP_EXPAND(MAP_LIST(TUPLE_PRIMITIVE, __VA_ARGS__))
+
+BEGIN_DECLS
+
+typedef enum
+{
+    LOG_SUCCESS = 10,
+    LOG_INFO = 50,
+    LOG_DEBUG = 254, // High "threshold" because we always want to see debug logs
+    LOG_WARNING = 100,
+    LOG_ERROR = 200, 
+    LOG_FATAL = 255 // High "threshold" too for obvious reasons
+} log_level;
+
+uint8_t picoutil_set_log_threshold(log_level threshold);
+void picoutil_log(log_level level, const char* format, ...) __printflike(2, 3);
+void picoutil_log_raw(const char* format, ...) __printflike(1, 2);
 
 END_DECLS
 
@@ -1583,14 +1678,27 @@ END_DECLS
 #if defined(TEST_PREPROCESSOR) && TEST_PREPROCESSOR
 /*
  * TODO: Write a `VA_RANGE` that could be called like this:
- * `VA_RANGE(FROM, TO)(...)`
+ * `VA_RANGE(FROM, TO)(...)` or `VA_RANGE(...)(FROM, TO)`
  */
 VA_RANGE(0, 2, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
 
 CHAOS_PP_EXPAND(CHAOS_PP_INVOKE(_0 CHAOS_PP_LAMBDA(+) _1 CHAOS_PP_LAMBDA(&&) CHAOS_PP_INC_(_1), 1, 2))
 
-__symver(picoutil_aes_init, 1, PICOUTIL, "1.0.0")
+__symver(picoutil_aes_init, 1, PICOUTIL, 0, 1, 0)
 
 __nonnull_params(0)
 __nonnull_params(1, 2, 3)
+
+picoutil_aes_process(0, 0, 0);
+picoutil_aes_process(0, 0, 0, 0);
+
+IS_EMPTY()
+IS_EMPTY(0)
+IS_EMPTY(0, 1)
+
+CHAOS_PP_IS_EMPTY(0)
+
+ENCLOSE_ALL_WITH_PARENS(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+
+CHAOS_PP_EXPR(CHAOS_PP_TUPLE_REVERSE(CHAOS_PP_SEQ_SIZE(TO_SEQ(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)), (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)))
 #endif

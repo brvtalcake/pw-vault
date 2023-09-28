@@ -18,7 +18,7 @@ uint64_t powu64(uint64_t base, uint64_t exp)
 __const
 int64_t pows64(int64_t base, int64_t exp)
 {
-    if (exp == 0 && base == 0)
+    if ((exp == 0 && base == 0) || exp < 0)
         return 0;
     if (exp == 0)
         return 1;

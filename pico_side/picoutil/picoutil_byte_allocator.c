@@ -257,6 +257,51 @@ static inline void merge_free_chunks(void)
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
 }
 
+static void destroy_null_chunks(void)
+{
+    if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
+        return;
+    recursive_mutex_enter_blocking(&picoutil_static_bytes_mutex);
+    memory_header_t* hdr = (memory_header_t*)(picoutil_static_bytes + first_hdr_off);
+    while (hdr)
+    {
+        if (hdr->chnk_limits[0] == hdr->chnk_limits[1])
+        {
+            if (hdr->prev != NULL)
+                hdr->prev->next = hdr->next;
+            if (hdr->next != NULL)
+                hdr->next->prev = hdr->prev;
+        }
+        hdr = hdr->next;
+    }
+    recursive_mutex_exit(&picoutil_static_bytes_mutex);
+}
+
+static void reorder_chunks(void)
+{
+    if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
+        return;
+    recursive_mutex_enter_blocking(&picoutil_static_bytes_mutex);
+    memory_header_t* hdr = (memory_header_t*)(picoutil_static_bytes + first_hdr_off);
+    while (hdr)
+    {
+        if (hdr->prev != NULL && hdr->prev->chnk_limits[1] > hdr->chnk_limits[0])
+        {
+            memory_header_t* prev = hdr->prev;
+            hdr->prev = prev->prev;
+            prev->prev = hdr;
+            prev->next = hdr->next;
+            hdr->next = prev;
+            if (hdr->prev != NULL)
+                hdr->prev->next = hdr;
+            if (prev->next != NULL)
+                prev->next->prev = prev;
+        }
+        hdr = hdr->next;
+    }
+    recursive_mutex_exit(&picoutil_static_bytes_mutex);
+}
+
 // TODO: Check if given pointer to free is in chunk rather than equal to data_start
 void __time_critical_func(picoutil_static_free)(void* ptr)
 {
@@ -287,6 +332,8 @@ void __time_critical_func(picoutil_static_free)(void* ptr)
             // if `picoutil_static_allocator_safe` is true, we need to clear the memory
             if (picoutil_static_allocator_safe)
                 picoutil_memset_explicit(hdr->data_start, 0, DATA_ROOM(hdr));
+            destroy_null_chunks();
+            //reorder_chunks();
             merge_free_chunks();
             recursive_mutex_exit(&picoutil_static_bytes_mutex);
             return;
@@ -294,6 +341,7 @@ void __time_critical_func(picoutil_static_free)(void* ptr)
         hdr = hdr->next;
     }
     merge_free_chunks();
+    picoutil_log(LOG_ERROR, "Failed to free pointer 0x%p (not found)", ptr);
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
 }
 

@@ -310,7 +310,72 @@ int main(void)
         // picoutil_test_sub_bytes();
         // picoutil_test_shift_rows();
         // picoutil_test_mix_columns();
-        picoutil_test_encryption_ecb_mode(13);
+        //picoutil_test_encryption_ecb_mode(13);
+        //test_aes_encrypt_decrypt_ecb();
+
+        picoutil_static_allocator_set_safe(true);
+        uint32_t* test1 = picoutil_static_calloc_aligned(4, 4, 4);
+        if (test1 == NULL)
+        {
+            printf("Failed to allocate memory\n");
+            goto reset;
+        }
+        uint32_t* test2 = picoutil_static_calloc_aligned(4, 100, 1);
+        if (test2 == NULL)
+        {
+            printf("Failed to allocate memory\n");
+            picoutil_static_free(test1);
+            goto reset;
+        }
+        uint32_t* test3 = picoutil_static_calloc_aligned(4, 100, 4);
+        if (test3 == NULL)
+        {
+            printf("Failed to allocate memory\n");
+            picoutil_static_free(test1);
+            picoutil_static_free(test2);
+            goto reset;
+        }
+
+        memcpy(test1, "Hello", 5);
+        memcpy(test2 + 50, "World", 5);
+        memcpy(test3 + 50, "!", 1);
+
+        printf("%s\n", test1);
+        printf("%s\n", test2 + 50);
+        printf("%s\n", test3 + 50);
+
+        picoutil_memset_explicit(test1, 143, 16);
+        picoutil_memset_explicit(test2, 143, 400);
+
+        puts("");
+        picoutil_static_allocator_dump_hdrs();
+
+        picoutil_static_free(test2);
+
+        byte_t* test4 = picoutil_static_alloc(100);
+        if (test4 == NULL)
+        {
+            printf("Failed to allocate memory\n");
+            picoutil_static_free(test1);
+            picoutil_static_free(test3);
+            goto reset;
+        }
+        memcpy(test4 + 50, "!", 2);
+        printf("%s\n", test4 + 50);
+
+        puts("");
+        picoutil_static_allocator_dump_hdrs();
+
+        picoutil_static_free(test1);
+        
+        puts("");
+        picoutil_static_allocator_dump_hdrs();
+
+        picoutil_static_free(test3);
+        picoutil_static_free(test4);
+
+        puts("");
+        picoutil_static_allocator_dump_hdrs();
 #endif
     }
 reset:
