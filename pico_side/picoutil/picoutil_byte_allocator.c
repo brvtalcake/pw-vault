@@ -485,14 +485,43 @@ void __time_critical_func(picoutil_static_free_all_except)(void** ptr, size_t co
     free(datptrs.ptrs);
 }
 
+static memory_header_t* search_containing_chunk(void* ptr)
+{
+    if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
+        return NULL;
+    recursive_mutex_enter_blocking(&picoutil_static_bytes_mutex);
+    memory_header_t* hdr = (memory_header_t*)(picoutil_static_bytes + first_hdr_off);
+    while (hdr)
+    {
+        if (IS_IN_CHUNK(hdr, ptr))
+        {
+            recursive_mutex_exit(&picoutil_static_bytes_mutex);
+            return hdr;
+        }
+        hdr = hdr->next;
+    }
+    recursive_mutex_exit(&picoutil_static_bytes_mutex);
+    return NULL;
+}
+
 // Reallocate previously allocated memory, but this time with a specified alignment
 __wur
 void* __time_critical_func(picoutil_static_realloc_aligned)(void* ptr, size_t size, size_t requested_align)
 {
     if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
         return NULL;
+    memory_header_t* hdr = search_containing_chunk(ptr);
+    if (hdr == NULL)
+        return NULL;
+    void* new_ptr = picoutil_static_alloc_aligned(size, requested_align);
+    if (new_ptr == NULL)
+        return NULL;
+    // Copy the data to a new location
+    memcpy(new_ptr, ptr, size);
+    // Free the old location
     picoutil_static_free(ptr);
-    return picoutil_static_alloc_aligned(size, requested_align);
+    // Return the new location
+    return new_ptr;
 }
 
 __wur
