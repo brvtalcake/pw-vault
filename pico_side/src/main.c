@@ -311,8 +311,9 @@ int main(void)
         // picoutil_test_shift_rows();
         // picoutil_test_mix_columns();
         //picoutil_test_encryption_ecb_mode(13);
-        //test_aes_encrypt_decrypt_ecb();
+        test_aes_encrypt_decrypt_ecb();
 
+#if 0
         picoutil_static_allocator_set_safe(true);
         uint32_t* test1 = picoutil_static_calloc_aligned(4, 4, 4);
         if (test1 == NULL)
@@ -376,6 +377,7 @@ int main(void)
 
         puts("");
         picoutil_static_allocator_dump_hdrs();
+#endif
 #endif
     }
 reset:

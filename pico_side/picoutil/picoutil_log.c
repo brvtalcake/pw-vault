@@ -1,5 +1,7 @@
 #include <picoutil.h>
 
+#include <pico/bootrom.h>
+
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -81,7 +83,6 @@ void picoutil_log(log_level level, const char* format, ...)
             break;
         case LOG_FATAL:
             printf(RED BOLD "[ FATAL ]  ");
-            __assert_func ("", 0, "", "FATAL ERROR");
             break;
         default:
             printf(PURPLE BOLD "[ UNKNOWN ]  ");
@@ -90,6 +91,8 @@ void picoutil_log(log_level level, const char* format, ...)
     printf(RESET);
     log_va_list(format, args);
     va_end(args);
+    if (level == LOG_FATAL)
+        reset_usb_boot(0, 0);
 }
 
 __printflike(1, 2)

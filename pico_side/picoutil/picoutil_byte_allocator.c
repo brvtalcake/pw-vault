@@ -7,6 +7,7 @@
 
 #include <pico/stdlib.h>
 #include <pico/sync.h>
+#include <pico/bootrom.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -36,12 +37,12 @@
 #ifdef CHNK_SZ
     #undef CHNK_SZ
 #endif
-#define CHNK_SZ(HDR) ((HDR)->chnk_limits[1] - (HDR)->chnk_limits[0])
+#define CHNK_SZ(HDR) ((uintptr_t)((HDR)->chnk_limits[1]) - (uintptr_t)((HDR)->chnk_limits[0]))
 
 #ifdef DATA_ROOM
     #undef DATA_ROOM
 #endif
-#define DATA_ROOM(HDR) ((HDR)->chnk_limits[1] - (HDR)->data_start)
+#define DATA_ROOM(HDR) ((uintptr_t)((HDR)->chnk_limits[1]) - (uintptr_t)((HDR)->data_start))
 
 #ifdef ENOUGH_ROOM
     #undef ENOUGH_ROOM
@@ -51,7 +52,24 @@
 #ifdef CAN_SPLIT
     #undef CAN_SPLIT
 #endif
-#define CAN_SPLIT(HDR, SIZE, ALIGN) (DATA_ROOM((HDR)) - align_ptr((HDR)->data_start, (ALIGN)).offset - align_ptr((void*)((uintptr_t)(HDR)->data_start + align_ptr((HDR)->data_start, (ALIGN)).offset + (SIZE)), alignof(memory_header_t)).offset - sizeof(memory_header_t) > (SIZE))
+#define CAN_SPLIT(HDR, SIZE, ALIGN)                                         \
+    (                                                                       \
+        /* All data space */                                                \
+        DATA_ROOM((HDR)) -                                                  \
+        /* minus the space needed to satisfy the alignment requirement */   \
+        align_ptr((HDR)->data_start, (ALIGN)).offset -                      \
+        /* minus the space needed to align the next (new) header */         \
+        align_ptr(                                                          \
+            (void*)(                                                        \
+                (uintptr_t)(HDR)->data_start +                              \
+                align_ptr((HDR)->data_start, (ALIGN)).offset +              \
+                (SIZE)                                                      \
+            ),                                                              \
+            alignof(memory_header_t)                                        \
+        ).offset -                                                          \
+        /* minus the space needed for the next (new) header */              \
+        sizeof(memory_header_t) > (SIZE)                                    \
+    )
 
 #ifdef NEXT_CHNK
     #undef NEXT_CHNK
@@ -63,8 +81,13 @@
 #endif
 #define PREV_CHNK(HDR) ((HDR)->prev->chnk_limits[0])
 
+#ifdef MEM_HDR_ALIGN
+    #undef MEM_HDR_ALIGN
+#endif
+#define MEM_HDR_ALIGN(ADDR) (align_ptr((ADDR), alignof(memory_header_t)).offset + (ADDR))
+
 typedef
-    struct memory_header ATTRIBUTE_WITH_PARAMS(aligned, alignof(max_align_t))
+    struct memory_header __aligned(alignof(max_align_t))
         memory_header_t;
 
 struct memory_header
@@ -138,13 +161,13 @@ void picoutil_static_allocator_init(bool safe)
     memory_offset_t offset = align_ptr(DECAY(picoutil_static_bytes), alignof(memory_header_t));
     assert(offset.ptr != NULL);
     if (offset.ptr == NULL)
-        printf("WARNING: Failed to align pointer\n");
+        picoutil_log(LOG_WARNING, "Failed to align pointer");
     assert(offset.offset == 0); // Because we aligned it
     if (offset.offset != 0)
-        printf("WARNING: Misaligned static bytes (wrong offset)\n");
+        picoutil_log(LOG_WARNING, "Misaligned static bytes (wrong offset)");
     assert(check_alignment_requirements(offset.ptr, alignof(memory_header_t)));
     if (!check_alignment_requirements(offset.ptr, alignof(memory_header_t)))
-        printf("WARNING: Misaligned static bytes (wrong alignment)\n");
+        picoutil_log(LOG_WARNING, "Misaligned static bytes (wrong alignment)");
 #if 0
     memory_header_t hdr = {
         .chnk_limits = { *(&picoutil_static_bytes), *(&picoutil_static_bytes) + PICOUTIL_STATIC_BYTES_SIZE },
@@ -196,11 +219,13 @@ void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t re
             hdr->free = false;
             hdr->data_start += align_ptr(hdr->data_start, requested_align).offset;
             recursive_mutex_exit(&picoutil_static_bytes_mutex);
+            picoutil_log(LOG_DEBUG, "Allocated %zu bytes aligned to %zu at 0x%p", size, requested_align, hdr->data_start);
             return hdr->data_start;
         }
         hdr = hdr->next;
     }
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
+    picoutil_log(LOG_WARNING, "Failed to allocate %zu bytes aligned to %zu (not enough room)", size, requested_align);
     return NULL;
 }
 
@@ -237,20 +262,29 @@ static inline void merge_free_chunks(void)
     {
         if (hdr->free)
         {
-            if (hdr->prev != NULL && hdr->prev->free)
+            memory_header_t* next_hdr = hdr->next;
+#if 0
+            if (next_hdr != NULL && next_hdr->free)
             {
-                hdr->prev->chnk_limits[1] = hdr->chnk_limits[1];
-                hdr->prev->next = hdr->next;
-                hdr->next->prev = hdr->prev;
-                hdr = hdr->prev;
-            }
-            if (hdr->next != NULL && hdr->next->free)
-            {
-                hdr->chnk_limits[1] = hdr->next->chnk_limits[1];
-                hdr->next = hdr->next->next;
+                hdr->chnk_limits[1] = next_hdr->chnk_limits[1];
+                hdr->next = next_hdr->next;
                 if (hdr->next != NULL)
                     hdr->next->prev = hdr;
+                if (picoutil_static_allocator_safe)
+                    picoutil_memset_explicit(next_hdr, 0, sizeof(memory_header_t));
             }
+#else
+            while (next_hdr != NULL && next_hdr->free)
+            {
+                hdr->chnk_limits[1] = next_hdr->chnk_limits[1];
+                hdr->next = next_hdr->next;
+                if (hdr->next != NULL)
+                    hdr->next->prev = hdr;
+                if (picoutil_static_allocator_safe)
+                    picoutil_memset_explicit(next_hdr, 0, sizeof(memory_header_t));
+                next_hdr = hdr->next;
+            }
+#endif
         }
         hdr = hdr->next;
     }
@@ -314,25 +348,11 @@ void __time_critical_func(picoutil_static_free)(void* ptr)
         if (hdr->data_start == ptr || IS_IN_CHUNK(hdr, ptr))
         {
             hdr->free = true;
-            if (hdr->prev != NULL && hdr->prev->free)
-            {
-                hdr->prev->chnk_limits[1] = hdr->chnk_limits[1];
-                hdr->prev->next = hdr->next;
-                hdr->next->prev = hdr->prev;
-                hdr = hdr->prev;
-            }
-            if (hdr->next != NULL && hdr->next->free)
-            {
-                hdr->chnk_limits[1] = hdr->next->chnk_limits[1];
-                hdr->next = hdr->next->next;
-                if (hdr->next != NULL)
-                    hdr->next->prev = hdr;
-            }
             hdr->data_start = hdr->chnk_limits[0] + align_ptr(hdr->chnk_limits[0], alignof(memory_header_t)).offset + sizeof(memory_header_t);
             // if `picoutil_static_allocator_safe` is true, we need to clear the memory
             if (picoutil_static_allocator_safe)
                 picoutil_memset_explicit(hdr->data_start, 0, DATA_ROOM(hdr));
-            destroy_null_chunks();
+            //destroy_null_chunks();
             //reorder_chunks();
             merge_free_chunks();
             recursive_mutex_exit(&picoutil_static_bytes_mutex);
@@ -341,7 +361,10 @@ void __time_critical_func(picoutil_static_free)(void* ptr)
         hdr = hdr->next;
     }
     merge_free_chunks();
-    picoutil_log(LOG_ERROR, "Failed to free pointer 0x%p (not found)", ptr);
+    if (picoutil_static_allocator_safe)
+        picoutil_log(LOG_FATAL, "Failed to free pointer 0x%p (not found)", ptr);
+    else
+        picoutil_log(LOG_ERROR, "Failed to free pointer 0x%p (not found)", ptr);
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
 }
 

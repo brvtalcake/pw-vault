@@ -254,6 +254,35 @@
 #ifndef __unreachable
     #define __unreachable() __builtin_unreachable()
 #endif
+#ifndef __trap
+    #define __trap() __builtin_trap()
+#endif
+#ifndef __assoc_barrier
+    // For example, `__assoc_barrier(a + b) + c` so that `a + b + c` is not reordered as `b + a + c`
+    // (Only for floating point operations, when `-fassociative-math` is enabled)
+    #define __assoc_barrier(OP) __builtin_assoc_barrier(OP)
+#endif
+
+#ifdef __bos
+    #undef __bos
+#endif
+#define __bos(PTR, TYPE) __builtin_object_size((PTR), (TYPE))
+
+#ifdef __bosdyn
+    #undef __bosdyn
+#endif
+#define __bosdyn(PTR, TYPE) __builtin_dynamic_object_size((PTR), (TYPE))
+
+#ifdef __bos0
+    #undef __bos0
+#endif
+#define __bos0(PTR) __builtin_object_size((PTR), 0)
+
+#ifdef __bosdyn0
+    #undef __bosdyn0
+#endif
+#define __bosdyn0(PTR) __builtin_dynamic_object_size((PTR), 0)
+
 #ifndef __assume
     #define __assume(EXPR) ATTRIBUTE_WITH_PARAMS(assume, !!(EXPR))
 #endif
@@ -687,6 +716,40 @@ enum barrier_option
     BARRIER_OPTIONS_COUNT = 9
 };
 
+#ifdef reinterpret_cast
+    #warning "reinterpret_cast macro is already defined. It will be redefined."
+    #undef reinterpret_cast
+#endif
+#define reinterpret_cast(TO, VAR)                       \
+    __builtin_choose_expr(                              \
+        TYPES_COMPATIBLE(TO, TYPEOF(VAR)),              \
+        (TO)(VAR),                                      \
+        (reinterpret_cast_PRIMITIVE(TO, VAR))           \
+    )
+
+#ifdef reinterpret_cast_PRIMITIVE
+    #warning "reinterpret_cast_PRIMITIVE macro is already defined. It will be redefined."
+    #undef reinterpret_cast_PRIMITIVE
+#endif
+#define reinterpret_cast_PRIMITIVE(TO, VAR)             \
+    ({                                                  \
+        union                                           \
+        {                                               \
+            __typeof__((VAR)) source;                   \
+            TO dest;                                    \
+        } PP_CAT(u, __LINE__) = { .source = (VAR) };    \
+        (TO)(PP_CAT(u, __LINE__).dest);                 \
+    })
+
+__const __always_inline
+static inline int picoutil_get_endian(void)
+{
+    static const uint32_t num = 1;
+    static const int little = -1;
+    static const int big = 1;
+    return *(const char*)&num == 1 ? little : big;
+}
+
 #if 0
 
 __artificial __always_inline
@@ -1072,7 +1135,7 @@ bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir d
  * @return true if the context was initialized successfully, false otherwise
  * @note The key and IV are copied to the context, so they can be freed after the call. They are assumed to be of type `aes_key_t*` and `aes_block_t*`, respectively
  */
-#define picoutil_aes_context_init(CTX, MODE, DIR, KEY_SIZE, BLOCK_SIZE, ...) picoutil_aes_context_init_impl((CTX), (MODE), (DIR), (KEY_SIZE), (BLOCK_SIZE), __VA_ARGS__, NULL)
+#define picoutil_aes_context_init(CTX, MODE, DIR, KEY_SIZE, BLOCK_SIZE, ...) picoutil_aes_context_init_impl((CTX), (MODE), (DIR), (KEY_SIZE), (BLOCK_SIZE), CHAOS_PP_VARIADIC_IF(IS_EMPTY(__VA_ARGS__))(NULL)(ENCLOSE_ALL_WITH_PARENS(__VA_ARGS__), NULL))
 
 /**
  * @fn void picoutil_aes_context_deinit(aes_context_t* ctx)

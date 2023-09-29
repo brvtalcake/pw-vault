@@ -4,9 +4,11 @@
 // TODO: Maybe configure the hardware interpolator to accelerate the speed of some calculations
 /* #include <hardware/interp.h> */
 
+#include <sys/types.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <stdio.h>
 
 typedef struct aes_user_data
 {
@@ -768,14 +770,14 @@ static inline size_t max_between(size_t a, size_t b)
     return a > b ? a : b;
 }
 
-static aes_key_expanded_t aes_key_schedule(aes_key_t key, ATTRIBUTE(unused) aes_block_size bsize)
+static aes_key_expanded_t aes_key_schedule(aes_key_t key, aes_block_size bsize)
 {
     picoutil_static_allocator_set_safe(true);
     
     const aes_word_t N = picoutil_aes_key_word_count(key.key_size);
     // In 32-bit words (aes_word_t)
     const aes_word_t BSIZE = picoutil_aes_block_word_count(bsize);
-    const ptrdiff_t R_ = picoutil_aes_round_count(key.key_size, bsize);
+    const ssize_t R_ = picoutil_aes_round_count(key.key_size, bsize);
     static const size_t MAX_RND_COUNT = 14;
     static const size_t MAX_BLOCK_WORD_CNT = 256 / (sizeof(aes_word_t) * 8); // = 8
     if (R_ < 0 || BSIZE * R_ > MAX_BLOCK_WORD_CNT * (MAX_RND_COUNT + 1)) // Sanity checks to avoid stack overflow
@@ -812,7 +814,7 @@ static aes_key_expanded_t aes_key_schedule(aes_key_t key, ATTRIBUTE(unused) aes_
             picoutil_static_free(expanded_key.round_keys);
             return (aes_key_expanded_t){ 0 };
         }
-        memcpy(expanded_key.round_keys[i], full_expanded_key + (i * BSIZE), BSIZE * sizeof(aes_word_t));
+        memcpy(expanded_key.round_keys[i], ((byte_t*)DECAY(full_expanded_key)) + (i * BSIZE * sizeof(aes_word_t)), BSIZE * sizeof(aes_word_t));
     }
     expanded_key.round_count = R - 1;
     return expanded_key;
@@ -1080,6 +1082,9 @@ static inline aes_block_t aes_prepare_entry(byte_t* entry, aes_block_t block)
 // To be used if the provided key buffer is not long enough (or too long)
 static inline bool aes_prepare_key(byte_t* buf, size_t bufsize, aes_key_size key_size)
 {
+    size_t expected_size = picoutil_aes_key_word_count(key_size) * sizeof(aes_word_t);
+    if (bufsize == expected_size)
+        return true;
     byte_t* bufcpy = picoutil_static_calloc(bufsize, sizeof(byte_t));
     if (bufcpy == NULL)
         return false;
@@ -1091,7 +1096,6 @@ static inline bool aes_prepare_key(byte_t* buf, size_t bufsize, aes_key_size key
     }
     memcpy(bufcpy, buf, bufsize);
     bzero(buf, bufsize);
-    size_t expected_size = picoutil_aes_key_word_count(key_size) * sizeof(aes_word_t);
     if (bufsize < expected_size)
     {
         for (size_t i = 0; bufsize * (i + 1) < expected_size; ++i)
@@ -1104,10 +1108,10 @@ static inline bool aes_prepare_key(byte_t* buf, size_t bufsize, aes_key_size key
         }
         memcpy(buf + (bufsize * (expected_size / bufsize)), bufcpy, expected_size % bufsize);
     }
-    else if (bufsize > expected_size)
+    else // if (bufsize > expected_size)
         memcpy(buf, bufcpy, expected_size);
-    picoutil_static_free(bufcpy);
     picoutil_static_free(temp);
+    picoutil_static_free(bufcpy);
     return true;
 }
 
@@ -1289,22 +1293,33 @@ void picoutil_aes_context_deinit(aes_context_t* ctx)
             picoutil_static_free(ctx->key->key);
         picoutil_static_free(ctx->key);
     }
-    printf("Freed key\n");
     if (ctx->iv != NULL)
     {
         if (ctx->iv->block != NULL)
             picoutil_static_free(ctx->iv->block);
         picoutil_static_free(ctx->iv);
     }
-    printf("Freed iv\n");
     if (ctx->key_expanded != NULL)
     {
         printf("Number of keys: %zu\n", ctx->key_expanded->round_count + 1);
         aes_key_expanded_free(*ctx->key_expanded);
-        picoutil_static_free(ctx->key_expanded); // Is it needed ?
+        picoutil_static_free(ctx->key_expanded);
     }
     printf("Freed key_expanded\n");
     *ctx = NULL_T(aes_context_t);
+}
+
+static void aes_free_user_data(aes_user_data_t data)
+{
+    if (data.blocks != NULL)
+    {
+        for (size_t i = 0; i < data.block_count; ++i)
+        {
+            if (data.blocks[i].block != NULL)
+                picoutil_static_free(data.blocks[i].block);
+        }
+        picoutil_static_free(data.blocks);
+    }
 }
 
 static aes_user_data_t aes_split_bytes(byte_t* bytes, size_t bytes_count, aes_block_size bsize)
@@ -1327,6 +1342,7 @@ static aes_user_data_t aes_split_bytes(byte_t* bytes, size_t bytes_count, aes_bl
             return NULL_T(aes_user_data_t);
         }
         aes_prepare_entry(bytes + (i * sizeof(aes_word_t) * picoutil_aes_block_word_count(bsize)), data.blocks[i]);
+        //aes_prepare_entry(bytes + (i * sizeof(aes_word_t) * picoutil_aes_block_word_count(bsize)), data.blocks[i]); // FIXME: Bug somewhere there
     }
     return data;
 }
@@ -1413,6 +1429,7 @@ end_of_opt:
         actual_iv = *ctx->iv;
 
     aes_user_data_t user_data = aes_split_bytes(data, data_size, ctx->block_size);
+    picoutil_static_allocator_dump_hdrs();
     if (user_data.blocks == NULL)
         return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
     for (size_t i = 0; i < user_data.block_count; ++i)
@@ -1436,16 +1453,14 @@ end_of_opt:
     res.data = picoutil_static_calloc_aligned(picoutil_aes_block_word_count(ctx->block_size) * user_data.block_count, sizeof(aes_word_t), alignof(byte_t));
     if (res.data == NULL)
     {
-        for (size_t i = 0; i < user_data.block_count; ++i)
-            picoutil_static_free(user_data.blocks[i].block);
-        picoutil_static_free(user_data.blocks);
+        aes_free_user_data(user_data);
         if (opt_key_ptr != NULL)
             aes_key_expanded_free(actual_keys);
         return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
     }
     for (size_t i = 0; i < user_data.block_count; ++i)
     {
-        memcpy(res.data + (i * sizeof(aes_word_t) * picoutil_aes_block_word_count(ctx->block_size)), user_data.blocks[i].block, sizeof(aes_word_t) * picoutil_aes_block_word_count(ctx->block_size));
+        memcpy(res.data + (i * sizeof(aes_word_t) * picoutil_aes_block_word_count(ctx->block_size)), user_data.blocks[i].block, sizeof(aes_word_t) * picoutil_aes_block_word_count(ctx->block_size)); // FIXME: Maybe bug somewhere there too
         picoutil_static_free(user_data.blocks[i].block);
     }
     res.data_size = picoutil_aes_block_word_count(ctx->block_size) * user_data.block_count * sizeof(aes_word_t);
@@ -1648,6 +1663,7 @@ void test_aes_encrypt_decrypt_ecb(void)
     printf("ORIGINAL TEXT:\n");
     print_buf(txt, 16);
 
+    /* picoutil_static_allocator_dump_hdrs(); */
     // MY IMPLEMENTATION
     aes_context_t ctx = { 0 };
     aes_key_t key = { 0 };
@@ -1656,14 +1672,21 @@ void test_aes_encrypt_decrypt_ecb(void)
         printf("Failed to initialize key\n");
         return;
     }
+    /* picoutil_static_allocator_dump_hdrs(); */
     if (!picoutil_aes_context_init(&ctx, AES_MODE_ECB, AES_DIR_ENCRYPT, AES_KEY_SIZE_128, AES_BLOCK_SIZE_128, &key))
     {
         printf("Failed to initialize context\n");
         return;
     }
+    /* picoutil_static_allocator_dump_hdrs(); */
     picoutil_aes_key_destroy(&key); // Since its content (and not the pointer) is copied into the context, we can destroy it safely
+    /* picoutil_static_allocator_dump_hdrs(); */
     aes_result_t res = picoutil_aes_process(&ctx, txt, 16);
-
+    if (res.error)
+    {
+        printf("Failed to encrypt\n");
+        return;
+    }
     // REFERENCE IMPLEMENTATION
     struct AES_ctx ctx_ref = { 0 };
     AES_init_ctx(&ctx_ref, key_buf);
@@ -1676,7 +1699,7 @@ void test_aes_encrypt_decrypt_ecb(void)
 
     puts("Test ended");
 
-    picoutil_static_allocator_dump_hdrs();
+    /* picoutil_static_allocator_dump_hdrs(); */
     
     puts("");
     puts("");
