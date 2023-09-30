@@ -47,7 +47,7 @@
 #ifdef ENOUGH_ROOM
     #undef ENOUGH_ROOM
 #endif
-#define ENOUGH_ROOM(HDR, SIZE, ALIGN) (DATA_ROOM((HDR)) - align_ptr((HDR)->data_start, (ALIGN)).offset >= (SIZE))
+#define ENOUGH_ROOM(HDR, SIZE, ALIGN) ( (int64_t)DATA_ROOM((HDR)) - (int64_t)(align_ptr((HDR)->data_start, (ALIGN)).offset) >= (int64_t)(SIZE))
 
 #ifdef CAN_SPLIT
     #undef CAN_SPLIT
@@ -55,20 +55,20 @@
 #define CAN_SPLIT(HDR, SIZE, ALIGN)                                         \
     (                                                                       \
         /* All data space */                                                \
-        DATA_ROOM((HDR)) -                                                  \
+        (int64_t)DATA_ROOM((HDR)) -                                         \
         /* minus the space needed to satisfy the alignment requirement */   \
-        align_ptr((HDR)->data_start, (ALIGN)).offset -                      \
+        (int64_t)(align_ptr((HDR)->data_start, (ALIGN)).offset) -           \
         /* minus the space needed to align the next (new) header */         \
-        align_ptr(                                                          \
+        (int64_t)(align_ptr(                                                \
             (void*)(                                                        \
                 (uintptr_t)(HDR)->data_start +                              \
                 align_ptr((HDR)->data_start, (ALIGN)).offset +              \
                 (SIZE)                                                      \
             ),                                                              \
             alignof(memory_header_t)                                        \
-        ).offset -                                                          \
+        ).offset) -                                                         \
         /* minus the space needed for the next (new) header */              \
-        sizeof(memory_header_t) > (SIZE)                                    \
+        (int64_t)(sizeof(memory_header_t)) > (int64_t)(SIZE)                \
     )
 
 #ifdef NEXT_CHNK
@@ -219,7 +219,7 @@ void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t re
             hdr->free = false;
             hdr->data_start += align_ptr(hdr->data_start, requested_align).offset;
             recursive_mutex_exit(&picoutil_static_bytes_mutex);
-            picoutil_log(LOG_DEBUG, "Allocated %zu bytes aligned to %zu at 0x%p", size, requested_align, hdr->data_start);
+            picoutil_log(LOG_SUCCESS, "Allocated %zu bytes aligned to %zu at 0x%p", size, requested_align, hdr->data_start);
             return hdr->data_start;
         }
         hdr = hdr->next;
@@ -291,6 +291,7 @@ static inline void merge_free_chunks(void)
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
 }
 
+__unused
 static void destroy_null_chunks(void)
 {
     if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
@@ -311,6 +312,7 @@ static void destroy_null_chunks(void)
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
 }
 
+__unused
 static void reorder_chunks(void)
 {
     if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))

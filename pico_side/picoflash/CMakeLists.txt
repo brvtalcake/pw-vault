@@ -7,3 +7,4 @@ target_link_libraries(
     ${pico_all_modules}
     picoutil
 )
+target_compile_options(picoflash PRIVATE "-Wall" "-Wextra" "-Werror" "-ftrack-macro-expansion=0" "-Wno-error=cpp")

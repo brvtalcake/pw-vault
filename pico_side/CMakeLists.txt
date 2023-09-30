@@ -124,25 +124,27 @@ add_subdirectory("./picoutil/")
 add_subdirectory("./aes_test/")
 
 if (TARGET tinyusb_device)
-    add_executable(storepw_pico_side ${pico_side_SOURCES})
-    add_dependencies(storepw_pico_side picoflash)
+    add_executable(pwv_pico_side ${pico_side_SOURCES})
+    add_dependencies(pwv_pico_side picoflash)
 
     # Add Boost::Preprocessor include directory
-    #[[ target_include_directories(storepw_pico_side PRIVATE ${Boost_INCLUDE_DIRS}) ]]
+    #[[ target_include_directories(pwv_pico_side PRIVATE ${Boost_INCLUDE_DIRS}) ]]
 
-    target_include_directories(storepw_pico_side PUBLIC "./picoflash/" "./picoutil/" "./src/" "./third_party/chaos-pp/")
+    target_include_directories(pwv_pico_side PUBLIC "./picoflash/" "./picoutil/" "./src/" "./third_party/chaos-pp/")
     target_link_libraries(
-        storepw_pico_side
+        pwv_pico_side
         ${pico_all_modules}
         picoflash picoutil aes_test
     )
+    # Add -Wall -Wextra
+    target_compile_options(pwv_pico_side PRIVATE "-Wall" "-Wextra" "-Werror" "-ftrack-macro-expansion=0")
 
-    pico_enable_stdio_usb(storepw_pico_side 1)
-    pico_enable_stdio_uart(storepw_pico_side 0)
+    pico_enable_stdio_usb(pwv_pico_side 1)
+    pico_enable_stdio_uart(pwv_pico_side 0)
 
-    #[[ pico_set_binary_type(storepw_pico_side copy_to_ram) ]]
+    #[[ pico_set_binary_type(pwv_pico_side copy_to_ram) ]]
 
-    pico_add_extra_outputs(storepw_pico_side)
+    pico_add_extra_outputs(pwv_pico_side)
 elseif(PICO_ON_DEVICE)
     message(FATAL_ERROR "Not building storepw because TinyUSB submodule is not initialized in the SDK")
 endif()

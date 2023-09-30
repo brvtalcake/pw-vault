@@ -694,15 +694,17 @@ void      picoutil_static_allocator_memdump(uintptr_t range[2]);
 
 enum barrier_target
 {
+    BARRIER_TGT_NONE = 0x0,
     BARRIER_DATA = 0x1,
     BARRIER_INS = 0x2,
     BARRIER_ALL = BARRIER_DATA | BARRIER_INS,
 
-    BARRIER_TARGET_COUNT = 3
+    BARRIER_TARGET_COUNT = 4
 };
 
 enum barrier_option
 {
+    BARRIER_OPT_NONE = 0x0,
     BARRIER_SY = 0x1,
     BARRIER_ST = 0x2,
     BARRIER_ISH = 0x4,
@@ -713,7 +715,7 @@ enum barrier_option
     BARRIER_OSHST = 0x80,
     BARRIER_ALL_OPTIONS = BARRIER_SY,
 
-    BARRIER_OPTIONS_COUNT = 9
+    BARRIER_OPTIONS_COUNT = 10
 };
 
 #ifdef reinterpret_cast
@@ -813,7 +815,7 @@ static inline void __time_critical_func(picoutil_memory_barrier)(enum barrier_op
 {
     switch (option)
     {
-        case 0:
+        case BARRIER_OPT_NONE:
             break;
         case BARRIER_SY:
             pico_default_asm_volatile(
@@ -1233,6 +1235,69 @@ END_DECLS
     #undef MUL
 #endif
 #define MUL(A, B) __fast_mul((A), (B))
+
+#ifdef SIGNED
+    #undef SIGNED
+#endif
+#define SIGNED(X)           \
+    _Generic((X),           \
+        int8_t: true,       \
+        int16_t: true,      \
+        int32_t: true,      \
+        int64_t: true,      \
+        bool: false,        \
+        uint8_t: false,     \
+        uint16_t: false,    \
+        uint32_t: false,    \
+        uint64_t: false     \
+    )
+
+#ifdef UNSIGNED
+    #undef UNSIGNED
+#endif
+#define UNSIGNED(X) (!SIGNED(X))
+
+#ifdef __fast_mul
+    #undef __fast_mul
+#endif
+// Litteraly taken from <pico/platform.h> and modified a bit
+#define __fast_mul(a, b)                                                                                    \
+    __builtin_choose_expr(                                                                                  \
+        __builtin_constant_p(b) && !__builtin_constant_p(a) && sizeofexpr((a) * (b)) <= sizeof(uint32_t),   \
+        (__builtin_popcount(b) >= 2 ? __mul_instruction_choose(a,b) : (a)*(b)),                             \
+        (a)*(b)                                                                                             \
+    )
+
+#ifdef __mul_instruction_choose
+    #undef __mul_instruction_choose
+#endif
+#define __mul_instruction_choose(a, b)                                                                      \
+    ({                                                                                                      \
+        TYPEOF(a) UNIQUE(ret) = (a);                                                                        \
+        if (SIGNED(a))                                                                                      \
+            UNIQUE(ret) = (TYPEOF(a)) __mul_instruction_signed((int32_t)(a), (int32_t)(b));                 \
+        else                                                                                                \
+            UNIQUE(ret) = (TYPEOF(a)) __mul_instruction_unsigned((uint32_t)(a), (uint32_t)(b));             \
+        UNIQUE(ret);                                                                                        \
+    })
+
+BEGIN_DECLS
+
+__const __always_inline
+static inline int32_t __mul_instruction_signed(int32_t a, int32_t b) 
+{
+    return __mul_instruction(a, b);
+}
+
+__const __always_inline
+static inline uint32_t __mul_instruction_unsigned(uint32_t a, uint32_t b) 
+{
+    pico_default_asm ("muls %0, %1" : "+l" (a) : "l" (b) : );
+    return a;
+}
+
+
+END_DECLS
 
 #ifdef ROTATE
     #undef ROTATE

@@ -207,15 +207,15 @@ int main(void)
         ++counter;
         uint32_t arr[] = { 1, 2, 3, 4, 5 };
         for (size_t i = 0; i < count_of(arr); ++i)
-            printf("%d ", arr[i]);
+            printf("%" PRIu32 " ", arr[i]);
         picoutil_memset_explicit(arr, 1, sizeof(arr));
         printf("\n");
         for (size_t i = 0; i < count_of(arr); ++i)
-            printf("%d ", arr[i]);
+            printf("%" PRIu32 " ", arr[i]);
         printf("\n");
         picoutil_memset_explicit(arr, 0, sizeof(arr));
         for (size_t i = 0; i < count_of(arr); ++i)
-            printf("%d ", arr[i]);
+            printf("%" PRIu32 " ", arr[i]);
         printf("\n");
         
 #if 0
@@ -312,6 +312,15 @@ int main(void)
         // picoutil_test_mix_columns();
         //picoutil_test_encryption_ecb_mode(13);
         test_aes_encrypt_decrypt_ecb();
+
+        uint32_t a1 = UINT32_MAX / 2 - ((UINT32_MAX / 2) % 2 == 0 ? 0 : 1); 
+        uint32_t b1 = 2;
+
+        int32_t a2 = INT32_MIN / 4;
+        int32_t b2 = 2;
+
+        printf("%" PRIu32 " == %" PRIu32 "\n", __mul_instruction_unsigned(a1, b1), a1 * b1);
+        printf("%" PRIi32 " == %" PRIi32 "\n", __mul_instruction_signed(a2, b2), a2 * b2);
 
 #if 0
         picoutil_static_allocator_set_safe(true);

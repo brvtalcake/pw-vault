@@ -49,7 +49,6 @@ uint8_t picoutil_set_log_threshold(log_level threshold)
     return old_threshold;
 }
 
-__fmtfunc(vprintf, 1, 2) // __vprintflike(1, 2)
 static void log_va_list(const char* format, va_list args)
 {
     vprintf(format, args);
@@ -59,9 +58,9 @@ static void log_va_list(const char* format, va_list args)
 __printflike(2, 3)
 void picoutil_log(log_level level, const char* format, ...)
 {
-    puts("");
     if ((uint8_t)level < log_threshold)
         return;
+    puts("");
     va_list args;
     va_start(args, format);
     switch (level)
