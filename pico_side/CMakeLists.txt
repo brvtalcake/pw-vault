@@ -1,4 +1,17 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.21)
+
+set(CMAKE_C_COMPILER "/toolchains/raspi/pico_full/bin/pico-gcc")
+set(CMAKE_CXX_COMPILER "/toolchains/raspi/pico_full/bin/pico-g++")
+set(CMAKE_ASM_COMPILER "/toolchains/raspi/pico_full/bin/pico-gcc")
+set(CMAKE_OBJCOPY "/toolchains/raspi/pico_full/bin/pico-objcopy")
+set(CMAKE_OBJDUMP "/toolchains/raspi/pico_full/bin/pico-objdump")
+set(CMAKE_SIZE "/toolchains/raspi/pico_full/bin/pico-size")
+set(CMAKE_NM "/toolchains/raspi/pico_full/bin/pico-gcc-nm")
+set(CMAKE_RANLIB "/toolchains/raspi/pico_full/bin/pico-gcc-ranlib")
+set(CMAKE_AR "/toolchains/raspi/pico_full/bin/pico-gcc-ar")
+set(CMAKE_LINKER "/toolchains/raspi/pico_full/bin/pico-ld")
+
+set(PICO_TOOLCHAIN_PATH "/toolchains/raspi/pico_full")
 
 set(__pico_sdk_path__ $ENV{PICO_SDK_PATH})
 
@@ -79,10 +92,13 @@ endif()
 include(${__pico_sdk_path__}/cmake/Platform/PICO.cmake)
 include("pico_sdk_import.cmake")
 include(CheckIPOSupported)
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_CXX_STANDARD 23)
+#[[ set_property(GLOBAL PROPERTY POSITION_INDEPENDENT_CODE OFF) ]]
+set_property(GLOBAL PROPERTY C_STANDARD_REQUIRED ON)
+set_property(GLOBAL PROPERTY CXX_STANDARD_REQUIRED ON)
 
 project(pw_vault C CXX ASM)
-set(CMAKE_C_STANDARD 17)
-set(CMAKE_CXX_STANDARD 20)
 check_ipo_supported(RESULT ipo_supported OUTPUT ipo_supported_output LANGUAGES C CXX)
 
 if (ipo_supported)
@@ -98,16 +114,14 @@ add_compile_options(-I/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault
 add_compile_options(-I/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault/third_party/chaos-pp/)
 
 #[[ add_compile_definitions(PICO_BOARD=${PICO_BOARD}) ]]
-add_compile_definitions(PICO_GCC_TRIPLE=${PICO_GCC_TRIPLE})
-add_compile_definitions(PICO_PLATFORM=${PICO_PLATFORM})
-add_compile_definitions(_FORTIFY_SOURCE=2)
+add_compile_definitions("PICO_GCC_TRIPLE=${PICO_GCC_TRIPLE}")
+add_compile_definitions("PICO_PLATFORM=${PICO_PLATFORM}")
+add_compile_definitions("_FORTIFY_SOURCE=2")
+add_compile_definitions("_GNU_SOURCE=1")
 add_compile_definitions("PICOUTIL_STATIC_BYTES_SIZE=(1024 * 2 * 2 * 2 * 2)")
 add_compile_options(-static)
 #[[ add_compile_options(-fno-strict-aliasing) ]]
 
-# Set C/C++ compiler to arm-none-eabi-{gcc,g++}
-# set(CMAKE_C_COMPILER "arm-none-eabi-gcc")
-# set(CMAKE_CXX_COMPILER "arm-none-eabi-g++")
 # Add `-mcpu='cortex-m0plus'` CFLAGS
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mcpu=cortex-m0plus")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcpu=cortex-m0plus")
@@ -134,10 +148,11 @@ if (TARGET tinyusb_device)
     target_link_libraries(
         pwv_pico_side
         ${pico_all_modules}
-        picoflash picoutil aes_test
+        picoflash picoutil aes_test #[[ "/toolchains/raspi/pico_full/arm-none-eabi/lib/libc.a" ]]
     )
     # Add -Wall -Wextra
     target_compile_options(pwv_pico_side PRIVATE "-Wall" "-Wextra" "-Werror" "-ftrack-macro-expansion=0")
+    target_compile_options(pico_stdio INTERFACE "-Wno-error=strict-aliasing")
 
     pico_enable_stdio_usb(pwv_pico_side 1)
     pico_enable_stdio_uart(pwv_pico_side 0)
@@ -148,7 +163,3 @@ if (TARGET tinyusb_device)
 elseif(PICO_ON_DEVICE)
     message(FATAL_ERROR "Not building storepw because TinyUSB submodule is not initialized in the SDK")
 endif()
-
-#[[ set_property(GLOBAL PROPERTY POSITION_INDEPENDENT_CODE OFF) ]]
-set_property(GLOBAL PROPERTY C_STANDARD_REQUIRED ON)
-set_property(GLOBAL PROPERTY CXX_STANDARD_REQUIRED ON)

@@ -4,6 +4,8 @@
 
 #include "../aes_test/aes.h"
 
+__restore_macro(__always_inline)
+
 #include <pico.h>
 
 #include <pico/stdio.h>
@@ -25,6 +27,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 
+#include <picoutil_fix_macros.h>
 #if 0
 void demo_allocator(void)
 {
@@ -311,7 +314,8 @@ int main(void)
         // picoutil_test_shift_rows();
         // picoutil_test_mix_columns();
         //picoutil_test_encryption_ecb_mode(13);
-        test_aes_encrypt_decrypt_ecb();
+        // test_aes_encrypt_decrypt_ecb();
+        test_aes_encrypt_decrypt_cbc();
 
         uint32_t a1 = UINT32_MAX / 2 - ((UINT32_MAX / 2) % 2 == 0 ? 0 : 1); 
         uint32_t b1 = 2;

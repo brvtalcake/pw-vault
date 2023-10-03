@@ -1,9 +1,13 @@
 #include <picoutil.h>
 
+__restore_macro(__always_inline)
+
 #include <pico/bootrom.h>
 
 #include <stdarg.h>
 #include <stdio.h>
+
+#include <picoutil_fix_macros.h>
 
 #ifdef BLUE
     #undef BLUE

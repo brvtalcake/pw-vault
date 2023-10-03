@@ -15,5 +15,6 @@ target_link_libraries(
 )
 target_include_directories(picoutil PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 # Add -Wall -Wextra warnings
-target_compile_options(picoutil PRIVATE "-Wall" "-Wextra" "-Werror" "-ftrack-macro-expansion=0")
+target_compile_options(picoutil PRIVATE "-ftrack-macro-expansion=0")
+target_compile_options(picoutil PUBLIC "-Wall" "-Wextra" "-Werror")
 #[[ target_compile_definitions(picoutil PUBLIC _FORTIFY_SOURCE=2) ]]

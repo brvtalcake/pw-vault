@@ -5,6 +5,8 @@
     #error PICOUTIL_STATIC_BYTES_SIZE not defined
 #endif
 
+__restore_macro(__always_inline)
+
 #include <pico/stdlib.h>
 #include <pico/sync.h>
 #include <pico/bootrom.h>
@@ -19,6 +21,8 @@
 #include <string.h> // memcpy, memset
 #include <math.h>
 #include <stdlib.h>
+
+#include <picoutil_fix_macros.h>
 
 // TODO: Do we need to communicate with other core and request it to stop when performing memory operations? (Are the mutexes enough ?) (At least they should)
 // Maybe create two pools for both cores and put them in .scratch_{x,y} sections, and create a third common pool for both cores
@@ -190,7 +194,7 @@ void picoutil_static_allocator_init(bool safe)
     picoutil_static_bytes_initialized = true;
 }
 
-__malloc __wur __mallocsize(1) __allocalign(2)
+__hot __malloc __wur __mallocsize(1) __allocalign(2)
 void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t requested_align)
 {
     if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
@@ -229,13 +233,13 @@ void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t re
     return NULL;
 }
 
-__malloc __wur __mallocsize(1)
+__hot __malloc __wur __mallocsize(1) __aligned_ret(alignof(max_align_t))
 void* __time_critical_func(picoutil_static_alloc)(size_t size)
 {
     return picoutil_static_alloc_aligned(size, alignof(max_align_t));
 }
 
-__malloc __wur __callocsize(1, 2) __allocalign(3)
+__hot __malloc __wur __callocsize(1, 2) __allocalign(3)
 void* __time_critical_func(picoutil_static_calloc_aligned)(size_t count, size_t size, size_t requested_align)
 {
     void* ptr = picoutil_static_alloc_aligned(size * count, requested_align);
@@ -245,7 +249,7 @@ void* __time_critical_func(picoutil_static_calloc_aligned)(size_t count, size_t 
     return ptr;
 }
 
-__malloc __wur __callocsize(1, 2)
+__hot __malloc __wur __callocsize(1, 2) __aligned_ret(alignof(max_align_t))
 void* __time_critical_func(picoutil_static_calloc)(size_t count, size_t size)
 {
     return picoutil_static_calloc_aligned(size, count, alignof(max_align_t));
@@ -338,6 +342,7 @@ static void reorder_chunks(void)
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
 }
 
+__hot
 // TODO: Check if given pointer to free is in chunk rather than equal to data_start
 void __time_critical_func(picoutil_static_free)(void* ptr)
 {
@@ -396,6 +401,7 @@ void picoutil_static_allocator_dump_hdrs(void)
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
 }
 
+__cold
 void picoutil_static_allocator_memdump(uintptr_t range[2])
 {
     if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
@@ -549,7 +555,7 @@ void* __time_critical_func(picoutil_static_realloc_aligned)(void* ptr, size_t si
     return new_ptr;
 }
 
-__wur
+__wur __aligned_ret(alignof(max_align_t))
 void* __time_critical_func(picoutil_static_realloc)(void* ptr, size_t size)
 {
     return picoutil_static_realloc_aligned(ptr, size, alignof(max_align_t));

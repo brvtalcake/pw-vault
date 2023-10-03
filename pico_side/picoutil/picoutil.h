@@ -20,6 +20,33 @@
     #endif
 #endif
 
+#ifdef PICOUTIL_HAS_C23
+    #undef PICOUTIL_HAS_C23
+#endif
+#if __STDC_VERSION__ > 201710L
+    #define PICOUTIL_HAS_C23 1
+#else
+    #define PICOUTIL_HAS_C23 0
+#endif
+
+#ifdef HAS_C_ATTRIBUTE
+    #undef HAS_C_ATTRIBUTE
+#endif
+#if defined(__has_c_attribute) && PICOUTIL_HAS_C23
+    #define HAS_C_ATTRIBUTE(ATTR) __has_c_attribute(ATTR)
+#else
+    #define HAS_C_ATTRIBUTE(ATTR) 0
+#endif
+
+#ifdef PICOUTIL_HAS_TYPED_ENUMS
+    #undef PICOUTIL_HAS_TYPED_ENUMS
+#endif
+#if __GNUC__ >= 13 && __GNUC_MINOR__ >= 2 && PICOUTIL_HAS_C23
+    #define PICOUTIL_HAS_TYPED_ENUMS 1
+#else
+    #define PICOUTIL_HAS_TYPED_ENUMS 0
+#endif
+
 #ifndef PICO_HAS_XOSC_SUBSYSTEM
     // ROSC should not be used as an entropy source if MCU is running with it as the clock source
     // (i.e. we don't have a "better" clock source (the XOSC))
@@ -55,11 +82,45 @@
 #ifdef ATTRIBUTE
     #undef ATTRIBUTE
 #endif
+#ifdef C_ATTRIBUTE
+    #undef C_ATTRIBUTE
+#endif
+#ifdef GNU_ATTRIBUTE
+    #undef GNU_ATTRIBUTE
+#endif
+#ifdef OLD_GNU_ATTRIBUTE
+    #undef OLD_GNU_ATTRIBUTE
+#endif
 #ifdef ATTRIBUTE_WITH_PARAMS
     #undef ATTRIBUTE_WITH_PARAMS
 #endif
-#define ATTRIBUTE(X) __attribute__((PP_CAT(__, X, __)))
-#define ATTRIBUTE_WITH_PARAMS(X, ...) __attribute__((PP_CAT(__, X, __)(__VA_ARGS__)))
+#ifdef C_ATTRIBUTE_WITH_PARAMS
+    #undef C_ATTRIBUTE_WITH_PARAMS
+#endif
+#ifdef GNU_ATTRIBUTE_WITH_PARAMS
+    #undef GNU_ATTRIBUTE_WITH_PARAMS
+#endif
+#ifdef OLD_GNU_ATTRIBUTE_WITH_PARAMS
+    #undef OLD_GNU_ATTRIBUTE_WITH_PARAMS
+#endif
+#define ATTRIBUTE(X) GNU_ATTRIBUTE(X)
+#define ATTRIBUTE_WITH_PARAMS(X, ...) GNU_ATTRIBUTE_WITH_PARAMS(X, __VA_ARGS__)
+#if PICOUTIL_HAS_C23
+    #define C_ATTRIBUTE(X) [[PP_CAT(__, X, __)]]
+    #define C_ATTRIBUTE_WITH_PARAMS(X, ...) [[PP_CAT(__, X, __)(__VA_ARGS__)]]
+#else
+    #define C_ATTRIBUTE(X)
+    #define C_ATTRIBUTE_WITH_PARAMS(X, ...)
+#endif
+#if PICOUTIL_HAS_C23 /*&& 0 Some attributes don't work for some reasons (only work when written as `__attribute__((blah))` instead of `[[gnu::blah]]`) */
+    #define GNU_ATTRIBUTE(X) [[__gnu__::PP_CAT(__, X, __)]]
+    #define GNU_ATTRIBUTE_WITH_PARAMS(X, ...) [[__gnu__::PP_CAT(__, X, __)(__VA_ARGS__)]]
+#else
+    #define GNU_ATTRIBUTE(X) OLD_GNU_ATTRIBUTE(X)
+    #define GNU_ATTRIBUTE_WITH_PARAMS(X, ...) OLD_GNU_ATTRIBUTE_WITH_PARAMS(X, __VA_ARGS__)
+#endif
+#define OLD_GNU_ATTRIBUTE(X) __attribute__((PP_CAT(__, X, __)))
+#define OLD_GNU_ATTRIBUTE_WITH_PARAMS(X, ...) __attribute__((PP_CAT(__, X, __)(__VA_ARGS__)))
 
 #ifndef UNLIKELY
     #define UNLIKELY(X) __builtin_expect(BIT(X), false)
@@ -78,9 +139,8 @@
 #ifdef HAS_ATTRIBUTE_WITH_PARAMS
     #undef HAS_ATTRIBUTE_WITH_PARAMS
 #endif
-#define HAS_ATTRIBUTE(X, ATTR) __builtin_has_attribute((X), ATTRIBUTE(ATTR))
-#define HAS_ATTRIBUTE_WITH_PARAMS(X, ATTR, ...) __builtin_has_attribute((X), ATTRIBUTE_WITH_PARAMS(ATTR, __VA_ARGS__))
-
+#define HAS_ATTRIBUTE(X, ATTR) __builtin_has_attribute((X), PP_CAT(__, ATTR, __))
+#define HAS_ATTRIBUTE_WITH_PARAMS(X, ATTR, ...) __builtin_has_attribute((X), PP_CAT(__, ATTR, __)(__VA_ARGS__))
 
 #ifdef TYPES_COMPATIBLE
     #undef TYPES_COMPATIBLE
@@ -163,8 +223,40 @@
 #endif
 #define VA_RANGE_PRIMITIVE(FROM, TO, ...) CHAOS_PP_EXPR(CHAOS_PP_SEQ_RANGE(FROM, CHAOS_PP_SUB(CHAOS_PP_INC(TO), FROM), TO_SEQ(__VA_ARGS__)))
 
-#ifndef __unused
-    #define __unused ATTRIBUTE(unused)
+#ifdef __save_macro
+    #undef __save_macro
+#endif
+#define __save_macro(MACRO) _Pragma(STRINGIFY(push_macro(#MACRO)))
+#ifdef __restore_macro
+    #undef __restore_macro
+#endif
+#define __restore_macro(MACRO) _Pragma(STRINGIFY(pop_macro(#MACRO)))
+
+#if !defined(__unused) || PICOUTIL_HAS_C23
+    #ifdef __unused
+        #undef __unused
+    #endif
+    #if HAS_C_ATTRIBUTE(maybe_unused)
+        #define __unused C_ATTRIBUTE(maybe_unused)
+    #else
+        #define __unused ATTRIBUTE(unused)
+    #endif
+#endif
+#ifdef __reproducible
+    #undef __reproducible
+#endif
+#if HAS_C_ATTRIBUTE(reproducible)
+    #define __reproducible C_ATTRIBUTE(reproducible)
+#else
+    #define __reproducible __pure
+#endif
+#ifdef __unsequenced
+    #undef __unsequenced
+#endif
+#if HAS_C_ATTRIBUTE(unsequenced)
+    #define __unsequenced C_ATTRIBUTE(unsequenced)
+#else
+    #define __unsequenced __pure /* `__const` is too strict */
 #endif
 #ifndef __used
     #define __used ATTRIBUTE(used)
@@ -176,7 +268,11 @@
     #define __aligned(X) ATTRIBUTE_WITH_PARAMS(aligned, X)
 #endif
 #ifndef __wur
-    #define __wur ATTRIBUTE(warn_unused_result)
+    #if HAS_C_ATTRIBUTE(nodiscard)
+        #define __wur C_ATTRIBUTE(nodiscard)
+    #else
+        #define __wur ATTRIBUTE(warn_unused_result)
+    #endif
 #endif
 #ifndef __sentinel
     #define __sentinel ATTRIBUTE(sentinel)
@@ -204,20 +300,38 @@
 #endif
 #define __const ATTRIBUTE(const)
 #ifndef __noreturn
-    #define __noreturn ATTRIBUTE(noreturn)
+    #if HAS_C_ATTRIBUTE(noreturn)
+        #define __noreturn C_ATTRIBUTE(noreturn)
+    #else
+        #define __noreturn ATTRIBUTE(noreturn)
+    #endif
 #endif
 #ifndef __deprecated
-    #define __deprecated ATTRIBUTE(deprecated)
+    #if HAS_C_ATTRIBUTE(deprecated)
+        #define __deprecated C_ATTRIBUTE(deprecated)
+    #else
+        #define __deprecated ATTRIBUTE(deprecated)
+    #endif
 #endif
 #ifndef __deprecated_msg
-    #define __deprecated_msg(MSG) ATTRIBUTE_WITH_PARAMS(deprecated, MSG)
+    #if HAS_C_ATTRIBUTE(deprecated)
+        #define __deprecated_msg(MSG) C_ATTRIBUTE_WITH_PARAMS(deprecated, MSG)
+    #else
+        #define __deprecated_msg(MSG) ATTRIBUTE_WITH_PARAMS(deprecated, MSG)
+    #endif
 #endif
 #ifndef __flatten
-    #define __flatten ATTRIBUTE(flatten)
+    #define __flatten OLD_GNU_ATTRIBUTE(flatten)
 #endif
-#ifndef __always_inline
-    #define __always_inline inline ATTRIBUTE(always_inline)
+#ifdef PICOUTIL_ALWAYS_INLINE
+    #undef PICOUTIL_ALWAYS_INLINE
 #endif
+#define PICOUTIL_ALWAYS_INLINE ATTRIBUTE(always_inline)
+#ifdef __always_inline
+    __save_macro(__always_inline)
+    #undef __always_inline
+#endif
+#define __always_inline PICOUTIL_ALWAYS_INLINE
 #ifndef __noinline
     #define __noinline ATTRIBUTE(noinline)
 #endif
@@ -249,10 +363,18 @@
     #define __hot ATTRIBUTE(hot)
 #endif
 #ifndef __fallthrough
-    #define __fallthrough ATTRIBUTE(fallthrough)
+    #if HAS_C_ATTRIBUTE(fallthrough)
+        #define __fallthrough C_ATTRIBUTE(fallthrough)
+    #else
+        #define __fallthrough ATTRIBUTE(fallthrough)
+    #endif
 #endif
 #ifndef __unreachable
-    #define __unreachable() __builtin_unreachable()
+    #if PICOUTIL_HAS_C23
+        #define __unreachable() unreachable()
+    #else
+        #define __unreachable() __builtin_unreachable()
+    #endif
 #endif
 #ifndef __trap
     #define __trap() __builtin_trap()
@@ -262,6 +384,59 @@
     // (Only for floating point operations, when `-fassociative-math` is enabled)
     #define __assoc_barrier(OP) __builtin_assoc_barrier(OP)
 #endif
+#ifdef __stdpragma
+    #undef __stdpragma
+#endif
+#define __stdpragma(PRG) _Pragma("STDC " STRINGIFY(PRG))
+#ifdef __fenv_access
+    #undef __fenv_access
+#endif
+#define __fenv_access(ON_OFF_DEFAULT) __stdpragma(FENV_ACCESS ON_OFF_DEFAULT)
+#ifdef __fenv_round
+    #undef __fenv_round
+#endif
+#define __fenv_round(ROUNDING_MODE) __stdpragma(FENV_ROUND ROUNDING_MODE)
+// TODO: Implement other pragmas
+#ifdef __diag_push
+    #undef __diag_push
+#endif
+#define __diag_push _Pragma("GCC diagnostic push")
+#ifdef __diag_pop
+    #undef __diag_pop
+#endif
+#define __diag_pop _Pragma("GCC diagnostic pop")
+#ifdef __suppress_warning
+    #undef __suppress_warning
+#endif
+#define __suppress_warning(WARNINGNAME) _Pragma(STRINGIFY(GCC diagnostic ignored STRCATIFY(-W, WARNINGNAME)));
+#ifdef __restore_warning
+    #undef __restore_warning
+#endif
+#define __restore_warning __diag_pop
+#ifdef __comp_log
+    #undef __comp_log
+#endif
+#define __comp_log(MSG) _Pragma(STRINGIFY(GCC message MSG))
+#ifdef __vectorize_loop
+    #undef __vectorize_loop
+#endif
+#define __vectorize_loop(BOOL) __vectorize_loop_PRIMITIVE(BOOL)
+#ifdef __vectorize_loop_PRIMITIVE
+    #undef __vectorize_loop_PRIMITIVE
+#endif
+#define __vectorize_loop_PRIMITIVE(TRUEORFALSE) PP_CAT(__vectorize_loop_, CHAOS_PP_BOOL(TRUEORFALSE))
+#ifdef __vectorize_loop_0
+    #undef __vectorize_loop_0
+#endif
+#define __vectorize_loop_0 _Pragma("GCC novector")
+#ifdef __vectorize_loop_1
+    #undef __vectorize_loop_1
+#endif
+#define __vectorize_loop_1 _Pragma("GCC ivdep")
+#ifdef __asm_name
+    #undef __asm_name
+#endif
+#define __asm_name(NAME) __asm__(STRINGIFY(NAME))
 
 #ifdef __bos
     #undef __bos
@@ -406,7 +581,10 @@
 })
 #endif
 #ifndef __assume_aligned
-    #define __assume_aligned(PTR, ALIGN) __builtin_assume_aligned((PTR), (ALIGN))
+    #define __assume_aligned(PTR, ALIGN, ...) __builtin_assume_aligned((PTR), (ALIGN), ##__VA_ARGS__)
+#endif
+#ifndef __aligned_ret
+    #define __aligned_ret(ALIGN, ...) ATTRIBUTE_WITH_PARAMS(assume_aligned, ALIGN, ##__VA_ARGS__)
 #endif
 #ifndef __artificial
     #define __artificial ATTRIBUTE(artificial)
@@ -482,10 +660,20 @@
 #endif
 #define POW_2(X) CHAOS_PP_ARBITRARY_DEMOTE(ARG1(UNTUPLE(POW_2_LOOP(X))))
 
+#ifdef IS_TUPLED
+    #undef IS_TUPLED
+#endif
+#define IS_TUPLED(...) IS_TUPLED_PRIMITIVE(__VA_ARGS__)
+
+#ifdef IS_TUPLED_PRIMITIVE
+    #undef IS_TUPLED_PRIMITIVE
+#endif
+#define IS_TUPLED_PRIMITIVE(...) CHAOS_PP_BOOL(IS_EMPTY(CHAOS_PP_EAT __VA_ARGS__))
+
 #ifdef EXPAND_FLAGS_LOOP_MACRO
     #undef EXPAND_FLAGS_LOOP_MACRO
 #endif
-#define EXPAND_FLAGS_LOOP_MACRO(s, i, elem, data) CHAOS_PP_COMMA_IF(CHAOS_PP_BOOL(i)) elem = 1U << i
+#define EXPAND_FLAGS_LOOP_MACRO(s, i, elem, data) CHAOS_PP_COMMA_IF(CHAOS_PP_BOOL(i)) CHAOS_PP_VARIADIC_IF(IS_TUPLED(elem))(UNTUPLE(elem))(elem = 1U << i)
 
 #ifdef EXPAND_FLAGS
     #undef EXPAND_FLAGS
@@ -502,6 +690,16 @@
     #undef DECL_FLAGS
 #endif
 #define DECL_FLAGS(...) enum { CHAOS_PP_EXPR(EXPAND_FLAGS(__VA_ARGS__)) }
+
+#ifdef DECL_TYPED_FLAGS
+    #undef DECL_TYPED_FLAGS
+#endif
+#if PICOUTIL_HAS_TYPED_ENUMS
+    // C23 only with at least GCC 13.2
+    #define DECL_TYPED_FLAGS(TYPENAME, ...) enum : TYPENAME { CHAOS_PP_EXPR(EXPAND_FLAGS(__VA_ARGS__)) }
+#else
+    #define DECL_TYPED_FLAGS(TYPENAME, ...) DECL_FLAGS(__VA_ARGS__)
+#endif
 
 #ifdef IDENTITY
     #undef IDENTITY
@@ -624,7 +822,12 @@
 
 BEGIN_DECLS
 
+__restore_macro(__always_inline)
+
 #include <pico/double.h>
+
+#include <picoutil_fix_macros.h>
+
 
 #ifdef intpow
     #undef intpow
@@ -642,7 +845,11 @@ BEGIN_DECLS
         default: powint     \
     )((X), (Y))
 
+__restore_macro(__always_inline)
+
 #include <tgmath.h>
+
+#include <picoutil_fix_macros.h>
 
 __const
 static uint8_t powu8(uint8_t base, uint8_t exp);
@@ -666,23 +873,35 @@ typedef uint8_t byte_t;
 
 // #define byte_t __buffer_var byte_t
 
+__restore_macro(__always_inline)
+
+#include <stddef.h>
+
+#include <picoutil_fix_macros.h>
+
 void      picoutil_static_allocator_init(bool safe);
 bool      picoutil_static_allocator_set_safe(bool safe);
 bool      picoutil_static_allocator_is_safe(void);
 
-__malloc __wur __mallocsize(1) __allocalign(2)
+__hot __malloc __mallocsize(1) __allocalign(2) __wur
 void*     __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t requested_align);
-__malloc __wur __mallocsize(1)
+
+__hot __malloc __mallocsize(1) __aligned_ret(alignof(max_align_t)) __wur
 void*     __time_critical_func(picoutil_static_alloc)(size_t size);
-__malloc __wur __callocsize(1, 2) __allocalign(3)
+
+__hot __malloc __callocsize(1, 2) __allocalign(3) __wur
 void*     __time_critical_func(picoutil_static_calloc_aligned)(size_t count, size_t size, size_t requested_align);
-__malloc __wur __callocsize(1, 2)
+
+__hot __malloc __callocsize(1, 2) __aligned_ret(alignof(max_align_t)) __wur
 void*     __time_critical_func(picoutil_static_calloc)(size_t count, size_t size);
+
 __wur
 void*     __time_critical_func(picoutil_static_realloc_aligned)(void* ptr, size_t size, size_t requested_align);
-__wur
+
+__aligned_ret(alignof(max_align_t)) __wur
 void*     __time_critical_func(picoutil_static_realloc)(void* ptr, size_t size);
 
+__hot
 void      __time_critical_func(picoutil_static_free)(void* ptr);
 void      __time_critical_func(picoutil_static_free_all)(void);
 void      __time_critical_func(picoutil_static_free_all_except)(void** ptr, size_t count);
@@ -690,9 +909,10 @@ void      __time_critical_func(picoutil_static_free_all_except)(void** ptr, size
 uintptr_t picoutil_static_bytes_get_start_addr(void);
 uintptr_t picoutil_static_bytes_get_end_addr(void);
 void      picoutil_static_allocator_dump_hdrs(void);
+__cold
 void      picoutil_static_allocator_memdump(uintptr_t range[2]);
 
-enum barrier_target
+enum barrier_target : uint8_t
 {
     BARRIER_TGT_NONE = 0x0,
     BARRIER_DATA = 0x1,
@@ -702,7 +922,7 @@ enum barrier_target
     BARRIER_TARGET_COUNT = 4
 };
 
-enum barrier_option
+enum barrier_option : uint8_t
 {
     BARRIER_OPT_NONE = 0x0,
     BARRIER_SY = 0x1,
@@ -790,14 +1010,123 @@ static inline void picoutil_explicit_bzero(void* const ptr, const size_t size)
 
 #endif
 
+#include CHAOS_PP_PLACEHOLDERS(0)
+#ifdef _ARG16
+    #undef _ARG16
+#endif
+#define _ARG16(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, ...) _15
+
+#ifdef HAS_COMMA
+    #undef HAS_COMMA
+#endif
+#define HAS_COMMA(...) _ARG16(__VA_ARGS__, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0)
+
+#ifdef _TRIGGER_PARENTHESIS_
+    #undef _TRIGGER_PARENTHESIS_
+#endif
+#define _TRIGGER_PARENTHESIS_(...) ,
+
+#ifdef IS_EMPTY
+    #undef IS_EMPTY
+#endif
+#define IS_EMPTY(...)                                                   \
+    _ISEMPTY(                                                           \
+          HAS_COMMA(__VA_ARGS__),                                       \
+          HAS_COMMA(_TRIGGER_PARENTHESIS_ __VA_ARGS__),                 \
+          HAS_COMMA(__VA_ARGS__ (/*empty*/)),                           \
+          HAS_COMMA(_TRIGGER_PARENTHESIS_ __VA_ARGS__ (/*empty*/))      \
+    )
+
+#ifdef _ISEMPTY
+    #undef _ISEMPTY
+#endif
+#define _ISEMPTY(_0, _1, _2, _3) HAS_COMMA(PP_CAT(_IS_EMPTY_CASE_, _0, _1, _2, _3))
+
+#ifdef _IS_EMPTY_CASE_0001
+    #undef _IS_EMPTY_CASE_0001
+#endif
+#define _IS_EMPTY_CASE_0001 ,
+
+#include CHAOS_PP_PLACEHOLDERS(1)
+
+#ifdef PP_ARG_IS_ZERO
+    #undef PP_ARG_IS_ZERO
+#endif
+#define PP_ARG_IS_ZERO(ARG) IS_EMPTY(PP_ARG_IS_ZERO_TEST(ARG))
+
+#ifdef PP_ARG_IS_ZERO_TEST
+    #undef PP_ARG_IS_ZERO_TEST
+#endif
+#define PP_ARG_IS_ZERO_TEST(ARG) PP_CAT(PP_ARG_IS_ZERO_TEST_, ARG)
+
+#ifdef PP_ARG_IS_ZERO_TEST_0
+    #undef PP_ARG_IS_ZERO_TEST_0
+#endif
+#define PP_ARG_IS_ZERO_TEST_0 CHAOS_PP_EMPTY()
+
+/**
+ * @fn bool picoutil_randbit(void)
+ * @brief Returns a random bit
+ */
+bool picoutil_randbit(void);
+/**
+ * @fn uint8_t picoutil_rand8(void)
+ * @brief Returns a random number with a width of 8 bits
+ */
+uint8_t picoutil_rand8(void);
+/**
+ * @fn uint16_t picoutil_rand16(void)
+ * @brief Returns a random number with a width of 16 bits
+ */
+uint16_t picoutil_rand16(void);
+/**
+ * @fn uint32_t picoutil_rand32(void)
+ * @brief Returns a random number with a width of 32 bits
+ */
+uint32_t picoutil_rand32(void);
+/**
+ * @fn uint64_t picoutil_rand64(void)
+ * @brief Returns a random number with a width of 64 bits
+ */
+uint64_t picoutil_rand64(void);
+/**
+ * @fn uint64_t picoutil_randn(uint64_t n)
+ * @brief Returns a random number with a width of `n` bits
+ * 
+ * @param n
+ * @return uint64_t 
+ */
+uint64_t picoutil_randn(uint64_t n);
+
+#ifdef RAND
+    #undef RAND
+#endif
+#define RAND(WIDTH, ...) (RAND_PRIMITIVE(WIDTH, ##__VA_ARGS__, 0, 0))
+
+#ifdef RAND_PRIMITIVE
+    #undef RAND_PRIMITIVE
+#endif
+#define RAND_PRIMITIVE(WIDTH, MIN, MAX, ...)                                        \
+    CHAOS_PP_VARIADIC_IF(CHAOS_PP_OR(PP_ARG_IS_ZERO(MIN))(PP_ARG_IS_ZERO(MAX)))     \
+    (                                                                               \
+        PP_CAT(picoutil_rand, WIDTH)()                                              \
+    )                                                                               \
+    (                                                                               \
+        (PP_CAT(picoutil_rand, WIDTH)()) % (MAX - MIN + 1) + MIN                    \
+    )
+
+
 __artificial __always_inline
+/**
+ * TODO: Optimize the same way we did for `picoutil_rand_fill`
+*/
 static inline void picoutil_memset_explicit(void* const ptr, const byte_t value, const size_t size)
 {
     byte_t* const ptr_ = (byte_t*)ptr;
     for (size_t i = 0; i < size; i++)
     {
         byte_t* ptr_i = ptr_ + i;
-        /* `value` and `ptr_i` must be in one of the following registers: r0 to r7 */
+        /* `value` and `ptr_i` should be in one of the following registers: r0 to r7 */
         pico_default_asm_volatile(
             "strb %[value], [%[ptr_i]]\n\t"
             : "=m" (*ptr_i)
@@ -808,6 +1137,119 @@ static inline void picoutil_memset_explicit(void* const ptr, const byte_t value,
     pico_default_asm_volatile(
         "\tisb sy\n\tdsb sy\n\t" : : "r" (ptr_) /* mark it as input */ : "memory"
     );
+}
+
+__artificial __always_inline
+static inline void __str8(uint8_t* const ptr, const uint8_t value)
+{
+    pico_default_asm_volatile(
+        "strb %[value], [%[ptr]]\n\t"
+        : "=m" (*ptr)
+        : [value] "l" (value), [ptr] "l" (ptr)
+        : "memory"
+    );
+}
+
+__artificial __always_inline
+static inline bool __str16(uint16_t* const ptr, const uint16_t value)
+{
+    if ((uintptr_t)ptr % 2 != 0)
+        return false;
+    pico_default_asm_volatile(
+        "strh %[value], [%[ptr]]\n\t"
+        : "=m" (*ptr)
+        : [value] "l" (value), [ptr] "l" (ptr)
+        : "memory"
+    );
+    return true;
+}
+
+__artificial __always_inline
+static inline bool __str32(uint32_t* const ptr, const uint32_t value)
+{
+    if ((uintptr_t)ptr % 4 != 0)
+        return false;
+    pico_default_asm_volatile(
+        "str %[value], [%[ptr]]\n\t"
+        : "=m" (*ptr)
+        : [value] "l" (value), [ptr] "l" (ptr)
+        : "memory"
+    );
+    return true;
+}
+
+__artificial
+/**
+ * @fn void picoutil_rand_fill(void* const ptr, const size_t size)
+ * @brief Fills the memory chunk pointed to by `ptr` with random data
+ * 
+ * @param ptr The pointer to the memory chunk to fill
+ * @param size The size of the memory chunk to fill
+ * 
+ * @return true if the memory chunk was filled successfully, false otherwise
+ * 
+ * @todo This function needs to be tested
+ * @note Do not use until it's tested
+ */
+static inline bool picoutil_rand_fill(void* const ptr, const size_t size)
+{
+    /*
+     * TODO: Instead of writing in the whole chunk byte per byte, write 4 bytes at a time once the
+     * address we're writing to is aligned properly (and write byte per byte for the beginning and
+     * potentially the end of the chunk).
+     */
+    byte_t* ptr_ = (byte_t*)ptr;
+    while ((uintptr_t)ptr_ % 4 != 0)
+    {
+        byte_t* ptr_i = ptr_++;
+        register uint8_t val = picoutil_rand8();
+#if 0
+        pico_default_asm_volatile(
+            "strb %[reg], [%[ptr_i]]\n\t"
+            : "=m" (*ptr_i)
+            : [reg] "l" (val), [ptr_i] "l" (ptr_i)
+            : "memory"
+        );
+#else
+        __str8((uint8_t*)ptr_i, val);
+#endif
+    }
+    uintptr_t i;
+    for (i = (uintptr_t)ptr_; i < (uintptr_t)ptr + size - (size % 4); i += 4)
+    {
+        uint32_t* ptr_i = (uint32_t*)i;
+        register uint32_t val = picoutil_rand32();
+#if 0
+        pico_default_asm_volatile(
+            "str %[reg], [%[ptr_i]]\n\t"
+            : "=m" (*ptr_i)
+            : [reg] "l" (val), [ptr_i] "l" (ptr_i)
+            : "memory"
+        );
+#else
+        if (!__str32(ptr_i, val))
+            return false;
+#endif
+    }
+    for (; i < (uintptr_t)ptr + size; i++)
+    {
+        byte_t* ptr_i = (byte_t*)i;
+        register uint8_t val = picoutil_rand8();
+#if 0
+        pico_default_asm_volatile(
+            "strb %[reg], [%[ptr_i]]\n\t"
+            : "=m" (*ptr_i)
+            : [reg] "l" (val), [ptr_i] "l" (ptr_i)
+            : "memory"
+        );
+#else
+        __str8((uint8_t*)ptr_i, val);
+#endif
+    }
+    pico_default_asm_volatile(
+        "\tisb sy\n\tdsb sy\n\t" : : "r" (ptr_) /* mark it as input */ : "memory"
+    );
+    return true;
 }
 
 __artificial __always_inline
@@ -1048,16 +1490,56 @@ typedef enum
     ((BLOCK_SIZE) == AES_BLOCK_SIZE_128 ? 4 : ((BLOCK_SIZE) == AES_BLOCK_SIZE_192 ? 6 :                         \
     ((BLOCK_SIZE) == AES_BLOCK_SIZE_256 ? 8 : -1)))
 
-typedef enum
+/* typedef enum
 {
-    AES_MODE_ECB = 0,
-    AES_MODE_CBC = 1,
-    AES_MODE_CTR = 2,
-    AES_MODE_CFB = 3,
-    AES_MODE_OFB = 4,
-    AES_MODE_CCM = 5,
-    AES_MODE_GCM = 6
-} aes_mode;
+    AES_MODE_ECB = 1U << 0, // Implemented
+    AES_MODE_CBC = 1U << 1, // Nearly implemented
+
+    AES_MODE_CTR = 1U << 2, // Not implemented
+    
+    AES_MODE_CFB = 1U << 3, // Not implemented
+    AES_MODE_OFB = 1U << 4, // Not implemented
+    
+    AES_MODE_CTS = 5,
+    AES_MODE_PCBC = 6,
+    AES_MODE_XEX = 7,
+    AES_MODE_TCB = 8,
+    AES_MODE_LRW = 9,
+    AES_MODE_XTS = 10,
+    AES_MODE_GCM = 11,
+    AES_MODE_CCM = 12,
+    AES_MODE_EAX = 13,
+    AES_MODE_OCB = 14,
+    AES_MODE_SIV = 15,
+    AES_MODE_GCM_SIV = 16,
+} aes_mode; */
+
+typedef
+    DECL_TYPED_FLAGS(
+        uint64_t,
+
+        AES_MODE_ECB, // Implemented
+        AES_MODE_CBC, // Nearly implemented
+
+        AES_MODE_CTR,
+        AES_MODE_CFB,
+        AES_MODE_OFB,
+        AES_MODE_SIV,
+        AES_MODE_CTS,
+        AES_MODE_PCBC,
+        AES_MODE_XEX,
+        AES_MODE_TCB,
+        AES_MODE_LRW,
+        AES_MODE_XTS,
+        AES_MODE_OCB,
+        AES_MODE_EAX,
+        AES_MODE_CCM,
+        AES_MODE_GCM,
+        AES_MODE_GCM_SIV,
+
+        (AES_MODE_COUNT = 17),
+        (AES_MODE_IMPLEMENTED = AES_MODE_ECB | AES_MODE_CBC)
+    ) aes_mode;
 
 typedef enum
 {
@@ -1115,11 +1597,29 @@ typedef struct aes_result
 
 void picoutil_aes_init(void);
 
-__zero_used_regs
+__zero_used_regs __wur
 bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size_t bufsize);
 __zero_used_regs
 void picoutil_aes_key_destroy(aes_key_t* key);
-__sentinel __zero_used_regs
+__zero_used_regs
+void picoutil_aes_iv_destroy(aes_block_t* iv);
+
+__sentinel __zero_used_regs __wur
+bool picoutil_aes_iv_init_impl(aes_block_t* iv, aes_block_size bsize, ...);
+#ifdef picoutil_aes_iv_init
+    #undef picoutil_aes_iv_init
+#endif
+/**
+ * @fn bool picoutil_aes_iv_init(aes_block_t* iv, aes_block_size bsize, ...)
+ * @brief Initialize an IV
+ * @param IV The IV pointer to initialize
+ * @param BSIZE The block size
+ * @param ... (optional) The IV (block_size bytes long, with a type of `byte_t*`). The provided block is otherwise filled with random data
+ * @return true if the IV was initialized successfully, false otherwise
+ */
+#define picoutil_aes_iv_init(IV, BSIZE, ...) picoutil_aes_iv_init_impl((IV), (BSIZE), CHAOS_PP_VARIADIC_IF(IS_EMPTY(__VA_ARGS__))(NULL)(ENCLOSE_ALL_WITH_PARENS(__VA_ARGS__), NULL))
+
+__sentinel __zero_used_regs __wur
 bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir dir, aes_key_size key_size, aes_block_size block_size, ...);
 #ifdef picoutil_aes_context_init
     #undef picoutil_aes_context_init
@@ -1179,6 +1679,8 @@ __zero_used_regs
 void picoutil_test_encryption_ecb_mode(size_t num_rounds);
 __zero_used_regs
 void test_aes_encrypt_decrypt_ecb(void);
+__zero_used_regs
+void test_aes_encrypt_decrypt_cbc(void);
 
 END_DECLS
 
@@ -1730,45 +2232,6 @@ static inline float rational_to_float(rational_t r)
 
 END_DECLS
 
-#include CHAOS_PP_PLACEHOLDERS(0)
-#ifdef _ARG16
-    #undef _ARG16
-#endif
-#define _ARG16(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, ...) _15
-
-#ifdef HAS_COMMA
-    #undef HAS_COMMA
-#endif
-#define HAS_COMMA(...) _ARG16(__VA_ARGS__, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0)
-
-#ifdef _TRIGGER_PARENTHESIS_
-    #undef _TRIGGER_PARENTHESIS_
-#endif
-#define _TRIGGER_PARENTHESIS_(...) ,
-
-#ifdef IS_EMPTY
-    #undef IS_EMPTY
-#endif
-#define IS_EMPTY(...)                                                   \
-    _ISEMPTY(                                                           \
-          HAS_COMMA(__VA_ARGS__),                                       \
-          HAS_COMMA(_TRIGGER_PARENTHESIS_ __VA_ARGS__),                 \
-          HAS_COMMA(__VA_ARGS__ (/*empty*/)),                           \
-          HAS_COMMA(_TRIGGER_PARENTHESIS_ __VA_ARGS__ (/*empty*/))      \
-    )
-
-#ifdef _ISEMPTY
-    #undef _ISEMPTY
-#endif
-#define _ISEMPTY(_0, _1, _2, _3) HAS_COMMA(PP_CAT(_IS_EMPTY_CASE_, _0, _1, _2, _3))
-
-#ifdef _IS_EMPTY_CASE_0001
-    #undef _IS_EMPTY_CASE_0001
-#endif
-#define _IS_EMPTY_CASE_0001 ,
-
-#include CHAOS_PP_PLACEHOLDERS(1)
-
 #ifdef ENCLOSE_ALL_WITH_PARENS
     #undef ENCLOSE_ALL_WITH_PARENS
 #endif
@@ -1829,4 +2292,30 @@ CHAOS_PP_IS_EMPTY(0)
 ENCLOSE_ALL_WITH_PARENS(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 
 CHAOS_PP_EXPR(CHAOS_PP_TUPLE_REVERSE(CHAOS_PP_SEQ_SIZE(TO_SEQ(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)), (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)))
+
+IS_TUPLED(blabla)
+IS_TUPLED((bla = 2 * bla))
+
+STRCATIFY(-W, test)
+
+__suppress_warning(test)
+#define TEST_MAC1 1
+TEST_MAC1 // 1
+__save_macro(TEST_MAC1)
+TEST_MAC1 // still 1
+#undef TEST_MAC1
+//TEST_MAC1 // error
+#define TEST_MAC1 2
+TEST_MAC1 // 2
+__restore_macro(TEST_MAC1)
+TEST_MAC1 // 1
+#undef TEST_MAC1
+
+__vectorize_loop(1)
+
+__assume_aligned(ptr, 4)
+__assume_aligned(ptr, 4, blah)
+
+__aligned_ret(4)
+__aligned_ret(4, blah, blah2)
 #endif

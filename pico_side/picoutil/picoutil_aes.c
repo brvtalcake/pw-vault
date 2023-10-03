@@ -1,5 +1,9 @@
 #include <picoutil.h>
 
+// TODO: Use PKCS#7 for padding instead of a custom useless one
+
+__restore_macro(__always_inline)
+
 #include <pico/sync.h>
 // TODO: Maybe configure the hardware interpolator to accelerate the speed of some calculations
 /* #include <hardware/interp.h> */
@@ -9,6 +13,8 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
+
+#include <picoutil_fix_macros.h>
 
 typedef struct aes_user_data
 {
@@ -577,7 +583,8 @@ __const
 static inline aes_word_t aes_round_constant(uint8_t round)
 {
     byte_t rcon[4] = { aes_round_constant_calc_rc(round), 0, 0, 0 };
-    return *(aes_word_t*)rcon;
+    byte_t* rcon_ptr = DECAY(rcon);
+    return *reinterpret_cast(aes_word_t*, rcon_ptr);
 }
 
 __const
@@ -1038,9 +1045,19 @@ static inline aes_block_t aes_add_round_key(aes_block_t block, aes_word_t* round
 
 static inline aes_block_t aes_add_iv(aes_block_t block, aes_block_t iv)
 {
-    // TODO
-    (void)block;
-    (void)iv;
+    for (int i = 0; i < picoutil_aes_block_word_count(block.block_size); ++i)
+    {
+        // TODO: Check if ok
+        byte_t bytes[sizeof(aes_word_t)] = { 0 };
+        byte_t iv_bytes[sizeof(aes_word_t)] = { 0 };
+        memcpy(bytes, &block.block[i], sizeof(aes_word_t));
+        memcpy(iv_bytes, &iv.block[i], sizeof(aes_word_t));
+        bytes[0] ^= iv_bytes[0];
+        bytes[1] ^= iv_bytes[1];
+        bytes[2] ^= iv_bytes[2];
+        bytes[3] ^= iv_bytes[3];
+        memcpy(&block.block[i], bytes, sizeof(aes_word_t));
+    }
     return block;
 }
 
@@ -1118,7 +1135,7 @@ static inline bool aes_prepare_key(byte_t* buf, size_t bufsize, aes_key_size key
     return true;
 }
 
-__zero_used_regs
+__zero_used_regs __wur
 bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size_t bufsize)
 {
     if (key == NULL || buf == NULL || bufsize == 0)
@@ -1136,7 +1153,7 @@ bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size
     return true;
 }
 
-__sentinel __zero_used_regs
+__sentinel __zero_used_regs __wur
 bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir dir, aes_key_size key_size, aes_block_size block_size, ...)
 {
     if (ctx == NULL)
@@ -1272,6 +1289,25 @@ void picoutil_aes_key_destroy(aes_key_t* key)
 }
 
 __zero_used_regs
+static void aes_block_destroy(aes_block_t* block)
+{
+    if (block == NULL)
+        return;
+    if (block->block != NULL)
+    {
+        picoutil_static_allocator_set_safe(true);
+        picoutil_static_free(block->block);
+    }
+    *block = NULL_T(aes_block_t);
+}
+
+__zero_used_regs
+void picoutil_aes_iv_destroy(aes_block_t* iv)
+{
+    aes_block_destroy(iv);
+}
+
+__zero_used_regs
 void picoutil_aes_result_destroy(aes_result_t* result)
 {
     if (result == NULL)
@@ -1389,6 +1425,21 @@ static aes_block_t aes_decrypt_ecb(aes_block_t block, aes_key_expanded_t keys)
     return block;
 }
 
+// TODO: Use second core too
+static inline aes_block_t aes_encrypt_cbc(aes_block_t block, aes_key_expanded_t keys, aes_block_t* iv)
+{
+    block = aes_add_iv(block, *iv);
+    block = aes_encrypt_ecb(block, keys);
+    return block;
+}
+
+static inline aes_block_t aes_decrypt_cbc(aes_block_t block, aes_key_expanded_t keys, aes_block_t* iv)
+{
+    aes_block_t temp = aes_decrypt_ecb(block, keys);
+    temp = aes_add_iv(temp, *iv);
+    return temp;
+}
+
 __wur __sentinel __zero_used_regs
 aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx, byte_t* data, size_t data_size, ...)
 {
@@ -1398,7 +1449,7 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
     aes_key_t opt_key = { 0 };
     aes_block_t opt_iv = { 0 };
     aes_key_expanded_t actual_keys = NULL_T(aes_key_expanded_t);
-    __unused aes_block_t actual_iv = NULL_T(aes_block_t);
+    aes_block_t actual_iv = NULL_T(aes_block_t);
     void* opt_key_ptr = NULL;
     void* opt_iv_ptr = NULL;
     va_list args;
@@ -1441,6 +1492,28 @@ end_of_opt:
     aes_user_data_t user_data = aes_split_bytes(data, data_size, ctx->block_size);
     if (user_data.blocks == NULL)
         return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+    aes_word_t* previous_encrypted_cbc_msg = NULL;
+    aes_word_t* tmp_encrypted_cbc_msg = NULL;
+    if (ctx->dir == AES_DIR_DECRYPT && ctx->mode == AES_MODE_CBC)
+    {
+        previous_encrypted_cbc_msg = picoutil_static_calloc_aligned(picoutil_aes_block_word_count(ctx->block_size), sizeof(aes_word_t), alignof(aes_word_t));
+        if (previous_encrypted_cbc_msg == NULL)
+        {
+            aes_free_user_data(user_data);
+            if (opt_key_ptr != NULL)
+                aes_key_expanded_free(actual_keys);
+            return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+        }
+        tmp_encrypted_cbc_msg = picoutil_static_calloc_aligned(picoutil_aes_block_word_count(ctx->block_size), sizeof(aes_word_t), alignof(aes_word_t));
+        if (tmp_encrypted_cbc_msg == NULL)
+        {
+            aes_free_user_data(user_data);
+            if (opt_key_ptr != NULL)
+                aes_key_expanded_free(actual_keys);
+            picoutil_static_free(previous_encrypted_cbc_msg);
+            return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+        }
+    }
     for (size_t i = 0; i < user_data.block_count; ++i)
     {
         switch (ctx->mode)
@@ -1454,14 +1527,24 @@ end_of_opt:
             case AES_MODE_CBC:
                 if (ctx->dir == AES_DIR_ENCRYPT)
                 {
-                    user_data.blocks[i] = aes_add_iv(user_data.blocks[i], actual_iv);
-                    user_data.blocks[i] = aes_encrypt_cbc(user_data.blocks[i], actual_keys);
-                    // TODO
+                    aes_block_t* current_iv = NULL;
+                    if (i == 0)
+                        current_iv = &actual_iv;
+                    else
+                        current_iv = &user_data.blocks[i - 1];
+                    user_data.blocks[i] = aes_encrypt_cbc(user_data.blocks[i], actual_keys, current_iv);
                 }
                 else
                 {
-                    // TODO
-                    __unreachable(/* UNIMPLEMENTED */);
+                    aes_block_t* current_iv = NULL;
+                    aes_block_t tmp = { .block = previous_encrypted_cbc_msg, .block_size = ctx->block_size };
+                    if (i == 0)
+                        current_iv = &actual_iv;
+                    else
+                        current_iv = &tmp;
+                    memcpy(tmp_encrypted_cbc_msg, user_data.blocks[i].block, sizeof(aes_word_t) * picoutil_aes_block_word_count(ctx->block_size));           
+                    user_data.blocks[i] = aes_decrypt_cbc(user_data.blocks[i], actual_keys, current_iv);
+                    memcpy(previous_encrypted_cbc_msg, tmp_encrypted_cbc_msg, sizeof(aes_word_t) * picoutil_aes_block_word_count(ctx->block_size));
                 }
                 break;
             /* Other cases go here too */
@@ -1469,6 +1552,11 @@ end_of_opt:
                 __unreachable(/* UNIMPLEMENTED */);
                 break;
         }
+    }
+    if (ctx->dir == AES_DIR_DECRYPT && ctx->mode == AES_MODE_CBC)
+    {
+        picoutil_static_free(previous_encrypted_cbc_msg);
+        picoutil_static_free(tmp_encrypted_cbc_msg);
     }
     aes_result_t res = { 0 };
     res.error = false;
@@ -1490,6 +1578,41 @@ end_of_opt:
     if (opt_key_ptr != NULL) // i.e. if we allocated the key by calling aes_key_schedule
         aes_key_expanded_free(actual_keys);
     return res;
+}
+
+__sentinel __zero_used_regs __wur
+bool picoutil_aes_iv_init_impl(aes_block_t* iv, aes_block_size bsize, ...)
+{
+    if (iv == NULL)
+        return false;
+
+    *iv = NULL_T(aes_block_t);
+
+    void* iv_ptr = NULL;
+    byte_t* iv_bytes = NULL;
+    va_list args;
+    va_start(args, bsize);
+
+    if ((iv_ptr = va_arg(args, void*)) != NULL)
+    {
+        iv_bytes = (byte_t*) iv_ptr;
+        iv->block_size = bsize;
+        iv->block = picoutil_static_calloc_aligned(picoutil_aes_block_word_count(bsize), sizeof(aes_word_t), alignof(aes_word_t));
+        if (iv->block == NULL)
+            return false;
+        memcpy(iv->block, iv_bytes, picoutil_aes_block_word_count(bsize) * sizeof(aes_word_t));
+    }
+    else
+    {
+        iv->block_size = bsize;
+        iv->block = picoutil_static_calloc_aligned(picoutil_aes_block_word_count(bsize), sizeof(aes_word_t), alignof(aes_word_t));
+        if (iv->block == NULL)
+            return false;
+        static_assert(sizeof(aes_word_t) * __CHAR_BIT__ == 32, "AES word size must be 32 bits");
+        for (int i = 0; i < picoutil_aes_block_word_count(bsize); ++i)
+            iv->block[i] = RAND(32);
+    }
+    return true;
 }
 
 aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, aes_key_t key)
@@ -1572,7 +1695,11 @@ ret:
 
 // TODO: Maybe consider adding other AES variants with different block sizes (not only different key sizes)
 
+__restore_macro(__always_inline)
+
 #include <inttypes.h>
+
+#include <picoutil_fix_macros.h>
 
 void print_block(aes_block_t block)
 {
@@ -1613,7 +1740,11 @@ void print_buf(uint8_t* buf, size_t len)
     puts("");
 }
 
+__restore_macro(__always_inline)
+
 #include "../aes_test/aes.h"
+
+#include <picoutil_fix_macros.h>
 
 __zero_used_regs
 void picoutil_test_encryption_ecb_mode(size_t num_rounds)
@@ -1676,12 +1807,13 @@ void picoutil_test_encryption_ecb_mode(size_t num_rounds)
 __zero_used_regs
 void test_aes_encrypt_decrypt_ecb(void)
 {
-    __buffer_var unsigned char key_buf[16] = "31415Ap2002#6666";
-    __buffer_var unsigned char txt[16] = "This is a test!";
-
+    __buffer_var unsigned char key_buf[16] = "blablablatruc666";
+    __buffer_var unsigned char txt[32] = "This is a test! This is a test ";
+    __buffer_var unsigned char txt_cpy[32] = { 0 };
+    memcpy(txt_cpy, txt, 32);
     // ORIGINAL TEXT
     puts("ORIGINAL TEXT:\n");
-    print_buf(txt, 16);
+    print_buf(txt, 32);
 
     puts("TESTING ENCRYPTION (ECB MODE)...\n");
 
@@ -1700,7 +1832,7 @@ void test_aes_encrypt_decrypt_ecb(void)
     }
     picoutil_aes_key_destroy(&key); // Since its content (and not the pointer) is copied into the context, we can destroy it safely
 
-    aes_result_t res = picoutil_aes_process(&ctx, txt, 16);
+    aes_result_t res = picoutil_aes_process(&ctx, txt, 32);
     if (res.error)
     {
         printf("Failed to encrypt\n");
@@ -1709,12 +1841,13 @@ void test_aes_encrypt_decrypt_ecb(void)
     // REFERENCE IMPLEMENTATION
     struct AES_ctx ctx_ref = { 0 };
     AES_init_ctx(&ctx_ref, key_buf);
-    AES_ECB_encrypt(&ctx_ref, txt);
+    AES_ECB_encrypt(&ctx_ref, txt_cpy);
+    AES_ECB_encrypt(&ctx_ref, txt_cpy + 16);
 
     printf("MY IMPLEMENTATION:\n");
     print_buf(res.data, res.data_size);
     printf("REFERENCE IMPLEMENTATION:\n");
-    print_buf(txt, 16);
+    print_buf(txt_cpy, 32);
 
     puts("TESTING DECRYPTION (ECB MODE)...\n");
     ctx.dir = AES_DIR_DECRYPT;
@@ -1725,12 +1858,100 @@ void test_aes_encrypt_decrypt_ecb(void)
         printf("Failed to decrypt\n");
         return;
     }
-    AES_ECB_decrypt(&ctx_ref, txt);
+    AES_ECB_decrypt(&ctx_ref, txt_cpy);
+    AES_ECB_decrypt(&ctx_ref, txt_cpy + 16);
 
     printf("MY IMPLEMENTATION:\n");
     print_buf(res.data, res.data_size);
     printf("REFERENCE IMPLEMENTATION:\n");
-    print_buf(txt, 16);
+    print_buf(txt_cpy, 32);
+
+    picoutil_aes_result_destroy(&old_res);
+    picoutil_aes_result_destroy(&res);
+    picoutil_aes_context_deinit(&ctx);
+
+    picoutil_static_allocator_dump_hdrs();
+}
+
+__zero_used_regs
+void test_aes_encrypt_decrypt_cbc(void)
+{
+    __buffer_var unsigned char key_buf[16] = "blablablatruc666";
+    __buffer_var unsigned char txt[32] = "This is a test! This is a test!";
+#if 0
+    __buffer_var unsigned char iv_buf[16] = { 0 };
+    if (!picoutil_rand_fill(iv_buf, 16))
+    {
+        printf("Failed to fill IV\n");
+        return;
+    }
+#else
+    __buffer_var unsigned char iv_buf[16] = "1234567890123456";
+#endif
+    __buffer_var unsigned char key_cpy[16] = "blablablatruc666";
+    __buffer_var unsigned char txt_cpy[32] = "This is a test! This is a test!";
+    __buffer_var unsigned char iv_cpy[16] = "1234567890123456";
+
+    // ORIGINAL TEXT
+    puts("ORIGINAL TEXT:\n");
+    print_buf(txt, 32);
+
+    puts("TESTING ENCRYPTION (CBC MODE)...\n");
+
+    // MY IMPLEMENTATION
+    aes_context_t ctx = { 0 };
+    aes_key_t key = { 0 };
+    aes_block_t iv = { 0 };
+    if (!picoutil_aes_key_init(&key, AES_KEY_SIZE_128, key_buf, 16))
+    {
+        printf("Failed to initialize key\n");
+        return;
+    }
+    if (!picoutil_aes_iv_init(&iv, AES_BLOCK_SIZE_128, iv_buf))
+    {
+        printf("Failed to initialize IV\n");
+        return;
+    }
+    if (!picoutil_aes_context_init(&ctx, AES_MODE_CBC, AES_DIR_ENCRYPT, AES_KEY_SIZE_128, AES_BLOCK_SIZE_128, &key, &iv))
+    {
+        printf("Failed to initialize context\n");
+        return;
+    }
+    picoutil_aes_key_destroy(&key); // Since its content (and not the pointer) is copied into the context, we can destroy it safely
+    picoutil_aes_iv_destroy(&iv);
+
+    aes_result_t res = picoutil_aes_process(&ctx, txt, 32);
+    if (res.error)
+    {
+        printf("Failed to encrypt\n");
+        return;
+    }
+    // REFERENCE IMPLEMENTATION
+    struct AES_ctx ctx_ref = { 0 };
+    AES_init_ctx_iv(&ctx_ref, key_cpy, iv_cpy);
+    AES_CBC_encrypt_buffer(&ctx_ref, txt_cpy, 32);
+
+    printf("MY IMPLEMENTATION:\n");
+    print_buf(res.data, res.data_size);
+    printf("REFERENCE IMPLEMENTATION:\n");
+    print_buf(txt_cpy, 32);
+
+    puts("TESTING DECRYPTION (CBC MODE)...\n");
+    ctx.dir = AES_DIR_DECRYPT;
+    aes_result_t old_res = (aes_result_t) { .data = res.data, .data_size = res.data_size };
+    res = picoutil_aes_process(&ctx, res.data, res.data_size);
+    if (res.error)
+    {
+        printf("Failed to decrypt\n");
+        return;
+    }
+    AES_ctx_set_iv(&ctx_ref, iv_buf);
+    AES_CBC_decrypt_buffer(&ctx_ref, txt_cpy, 32);
+
+    printf("MY IMPLEMENTATION:\n");
+    print_buf(res.data, res.data_size);
+    printf("REFERENCE IMPLEMENTATION:\n");
+    print_buf(txt_cpy, 32);
 
     picoutil_aes_result_destroy(&old_res);
     picoutil_aes_result_destroy(&res);

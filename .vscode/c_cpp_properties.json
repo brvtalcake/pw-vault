@@ -2,8 +2,8 @@
     "configurations": [
         {
             "name": "Raspi-pico",
-            "compilerPath": "/usr/bin/arm-none-eabi-gcc",
-            "compilerArgs": ["-mcpu=cortex-m0plus", "-std=gnu17", "-D_GNU_SOURCE=1"],
+            "compilerPath": "/toolchains/raspi/pico_monolib/bin/pico-gcc",
+            "compilerArgs": ["-mcpu=cortex-m0plus", "-std=gnu2x", "-D_GNU_SOURCE=1"],
             "includePath": [
                 "${workspaceFolder}/**",
                 "/home/axel/Documents/programmation/mcu/raspi/pico/store_pw/",
