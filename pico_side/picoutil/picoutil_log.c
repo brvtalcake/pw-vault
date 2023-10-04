@@ -3,9 +3,11 @@
 __restore_macro(__always_inline)
 
 #include <pico/bootrom.h>
+#include <pico/stdlib.h>
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <picoutil_fix_macros.h>
 
@@ -95,7 +97,11 @@ void picoutil_log(log_level level, const char* format, ...)
     log_va_list(format, args);
     va_end(args);
     if (level == LOG_FATAL)
+#if defined(PICO_ENTER_USB_BOOT_ON_EXIT) && PICO_ENTER_USB_BOOT_ON_EXIT
+        exit(EXIT_FAILURE);
+#else
         reset_usb_boot(0, 0);
+#endif
 }
 
 __printflike(1, 2)
@@ -107,3 +113,7 @@ void picoutil_log_raw(const char* format, ...)
     log_va_list(format, args);
     va_end(args);
 }
+
+// TODO: Write `picoutil_panic` like so:
+//     extern void __attribute__((noreturn)) __printflike(1, 0) PICO_PANIC_FUNCTION(__unused const char *fmt, ...);
+// And define `PICO_PANIC_FUNCTION` to be `picoutil_panic` 

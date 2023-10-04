@@ -1959,3 +1959,138 @@ void test_aes_encrypt_decrypt_cbc(void)
 
     picoutil_static_allocator_dump_hdrs();
 }
+
+__zero_used_regs
+// Do not test reference implementation
+void test_aes_encrypt_decrypt_ecb_256_blocksize_192_keysize_no_reference(void)
+{
+    __buffer_var unsigned char key_buf[24] = "blablablatruc666bla1234";
+    __buffer_var unsigned char txt[64] = "This is a test! This is a test! This is a test! This is a test! ";
+    __buffer_var unsigned char txt_cpy[64] = { 0 };
+    memcpy(txt_cpy, txt, 64);
+
+    puts("ORIGINAL TEXT:\n");
+    print_buf(txt, 64);
+
+    puts("TESTING ENCRYPTION (ECB MODE)...\n");
+
+    aes_context_t ctx = { 0 };
+    aes_key_t key = { 0 };
+    if (!picoutil_aes_key_init(&key, AES_KEY_SIZE_192, key_buf, 24))
+    {
+        printf("Failed to initialize key\n");
+        return;
+    }
+    if (!picoutil_aes_context_init(&ctx, AES_MODE_ECB, AES_DIR_ENCRYPT, AES_KEY_SIZE_192, AES_BLOCK_SIZE_256, &key))
+    {
+        printf("Failed to initialize context\n");
+        return;
+    }
+    picoutil_aes_key_destroy(&key);
+
+    aes_result_t res = picoutil_aes_process(&ctx, txt, 64);
+    if (res.error)
+    {
+        printf("Failed to encrypt\n");
+        return;
+    }
+
+    printf("MY IMPLEMENTATION:\n");
+    print_buf(res.data, res.data_size);
+
+    puts("TESTING DECRYPTION (ECB MODE)...\n");
+    ctx.dir = AES_DIR_DECRYPT;
+    aes_result_t old_res = (aes_result_t) { .data = res.data, .data_size = res.data_size };
+    res = picoutil_aes_process(&ctx, res.data, res.data_size);
+    if (res.error)
+    {
+        printf("Failed to decrypt\n");
+        return;
+    }
+
+    printf("MY IMPLEMENTATION:\n");
+    print_buf(res.data, res.data_size);
+
+    if (memcmp(txt, res.data, 64) != 0)
+        printf("FAILURE: %s != %s\n", txt, (const char*) strndupa((const char*) res.data, 64));
+    else
+        printf("SUCCESS: %s == %s\n", txt, (const char*) strndupa((const char*) res.data, 64));
+
+    picoutil_aes_result_destroy(&old_res);
+    picoutil_aes_result_destroy(&res);
+    picoutil_aes_context_deinit(&ctx);
+
+    picoutil_static_allocator_dump_hdrs();
+}
+
+__zero_used_regs
+void test_aes_encrypt_decrypt_cbc_192_blocksize_256_keysize_no_reference(void)
+{
+    __buffer_var unsigned char key_buf[32] = "blablablatruc666bla1234bla5678";
+    __buffer_var unsigned char txt[64] = "This is a test! This is a test! This is a test! This is a test! ";
+    __buffer_var unsigned char txt_cpy[64] = { 0 };
+    // The iv must be of the same size as the block size (i.e. 192 bits)
+    __buffer_var unsigned char iv_buf[24] = "123456789012345678901234";
+    __unused __buffer_var unsigned char iv_cpy[24] = "123456789012345678901234";
+    memcpy(txt_cpy, txt, 64);
+
+    puts("ORIGINAL TEXT:\n");
+    print_buf(txt, 64);
+
+    puts("TESTING ENCRYPTION (CBC MODE)...\n");
+
+    aes_context_t ctx = { 0 };
+    aes_key_t key = { 0 };
+    aes_block_t iv = { 0 };
+    if (!picoutil_aes_key_init(&key, AES_KEY_SIZE_256, key_buf, 32))
+    {
+        printf("Failed to initialize key\n");
+        return;
+    }
+    if (!picoutil_aes_iv_init(&iv, AES_BLOCK_SIZE_192, iv_buf))
+    {
+        printf("Failed to initialize IV\n");
+        return;
+    }
+    if (!picoutil_aes_context_init(&ctx, AES_MODE_CBC, AES_DIR_ENCRYPT, AES_KEY_SIZE_256, AES_BLOCK_SIZE_192, &key, &iv))
+    {
+        printf("Failed to initialize context\n");
+        return;
+    }
+    picoutil_aes_key_destroy(&key);
+    picoutil_aes_iv_destroy(&iv);
+
+    aes_result_t res = picoutil_aes_process(&ctx, txt, 64);
+    if (res.error)
+    {
+        printf("Failed to encrypt\n");
+        return;
+    }
+
+    printf("MY IMPLEMENTATION:\n");
+    print_buf(res.data, res.data_size);
+
+    puts("TESTING DECRYPTION (CBC MODE)...\n");
+    ctx.dir = AES_DIR_DECRYPT;
+    aes_result_t old_res = (aes_result_t) { .data = res.data, .data_size = res.data_size };
+    res = picoutil_aes_process(&ctx, res.data, res.data_size);
+    if (res.error)
+    {
+        printf("Failed to decrypt\n");
+        return;
+    }
+
+    printf("MY IMPLEMENTATION:\n");
+    print_buf(res.data, res.data_size);
+
+    if (memcmp(txt, res.data, 64) != 0)
+        printf("FAILURE: %s != %s\n", txt, (const char*) strndupa((const char*) res.data, 64));
+    else
+        printf("SUCCESS: %s == %s\n", txt, (const char*) strndupa((const char*) res.data, 64));
+
+    picoutil_aes_result_destroy(&old_res);
+    picoutil_aes_result_destroy(&res);
+    picoutil_aes_context_deinit(&ctx);
+
+    picoutil_static_allocator_dump_hdrs();
+}

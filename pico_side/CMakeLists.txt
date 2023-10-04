@@ -1,17 +1,31 @@
 cmake_minimum_required(VERSION 3.21)
 
-set(CMAKE_C_COMPILER "/toolchains/raspi/pico_full/bin/pico-gcc")
-set(CMAKE_CXX_COMPILER "/toolchains/raspi/pico_full/bin/pico-g++")
-set(CMAKE_ASM_COMPILER "/toolchains/raspi/pico_full/bin/pico-gcc")
-set(CMAKE_OBJCOPY "/toolchains/raspi/pico_full/bin/pico-objcopy")
-set(CMAKE_OBJDUMP "/toolchains/raspi/pico_full/bin/pico-objdump")
-set(CMAKE_SIZE "/toolchains/raspi/pico_full/bin/pico-size")
-set(CMAKE_NM "/toolchains/raspi/pico_full/bin/pico-gcc-nm")
-set(CMAKE_RANLIB "/toolchains/raspi/pico_full/bin/pico-gcc-ranlib")
-set(CMAKE_AR "/toolchains/raspi/pico_full/bin/pico-gcc-ar")
-set(CMAKE_LINKER "/toolchains/raspi/pico_full/bin/pico-ld")
+# If `PWVAULT_MAINTAINER_BUILD` environment variable is set to `1`, then set `IS_MAINTAINER_BUILD` to `ON`, else set it to `OFF`
+if (DEFINED ENV{PWVAULT_MAINTAINER_BUILD})
+    if ($ENV{PWVAULT_MAINTAINER_BUILD} STREQUAL "1")
+        set(IS_MAINTAINER_BUILD ON)
+    else()
+        set(IS_MAINTAINER_BUILD OFF)
+    endif()
+else()
+    set(IS_MAINTAINER_BUILD OFF)
+endif()
 
-set(PICO_TOOLCHAIN_PATH "/toolchains/raspi/pico_full")
+if (${IS_MAINTAINER_BUILD})
+    set(CMAKE_C_COMPILER "/toolchains/raspi/pico_full/bin/pico-gcc")
+    set(CMAKE_CXX_COMPILER "/toolchains/raspi/pico_full/bin/pico-g++")
+    set(CMAKE_ASM_COMPILER "/toolchains/raspi/pico_full/bin/pico-gcc")
+    set(CMAKE_OBJCOPY "/toolchains/raspi/pico_full/bin/pico-objcopy")
+    set(CMAKE_OBJDUMP "/toolchains/raspi/pico_full/bin/pico-objdump")
+    set(CMAKE_SIZE "/toolchains/raspi/pico_full/bin/pico-size")
+    set(CMAKE_NM "/toolchains/raspi/pico_full/bin/pico-gcc-nm")
+    set(CMAKE_RANLIB "/toolchains/raspi/pico_full/bin/pico-gcc-ranlib")
+    set(CMAKE_AR "/toolchains/raspi/pico_full/bin/pico-gcc-ar")
+    set(CMAKE_LINKER "/toolchains/raspi/pico_full/bin/pico-ld")
+    set(CMAKE_STRIP "/toolchains/raspi/pico_full/bin/pico-strip")
+    set(PICO_TOOLCHAIN_PATH "/toolchains/raspi/pico_full")
+endif()
+
 
 set(__pico_sdk_path__ $ENV{PICO_SDK_PATH})
 
@@ -109,18 +123,20 @@ else()
     message(FATAL_ERROR "IPO / LTO not supported: <${ipo_supported_output}>")
 endif()
 
-# For picoflash and picoutil, we need Boost::Preprocessor
-add_compile_options(-I/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault/)
-add_compile_options(-I/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault/third_party/chaos-pp/)
+add_compile_options("-I/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault/")
+add_compile_options("-I/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault/third_party/chaos-pp/")
 
 #[[ add_compile_definitions(PICO_BOARD=${PICO_BOARD}) ]]
 add_compile_definitions("PICO_GCC_TRIPLE=${PICO_GCC_TRIPLE}")
 add_compile_definitions("PICO_PLATFORM=${PICO_PLATFORM}")
+add_compile_definitions("PICO_USE_STACK_GUARDS=0")
+add_compile_definitions("PICO_ENTER_USB_BOOT_ON_EXIT=1")
+
 add_compile_definitions("_FORTIFY_SOURCE=2")
 add_compile_definitions("_GNU_SOURCE=1")
 add_compile_definitions("PICOUTIL_STATIC_BYTES_SIZE=(1024 * 2 * 2 * 2 * 2)")
+
 add_compile_options(-static)
-#[[ add_compile_options(-fno-strict-aliasing) ]]
 
 # Add `-mcpu='cortex-m0plus'` CFLAGS
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mcpu=cortex-m0plus")
@@ -141,14 +157,11 @@ if (TARGET tinyusb_device)
     add_executable(pwv_pico_side ${pico_side_SOURCES})
     add_dependencies(pwv_pico_side picoflash)
 
-    # Add Boost::Preprocessor include directory
-    #[[ target_include_directories(pwv_pico_side PRIVATE ${Boost_INCLUDE_DIRS}) ]]
-
     target_include_directories(pwv_pico_side PUBLIC "./picoflash/" "./picoutil/" "./src/" "./third_party/chaos-pp/")
     target_link_libraries(
         pwv_pico_side
         ${pico_all_modules}
-        picoflash picoutil aes_test #[[ "/toolchains/raspi/pico_full/arm-none-eabi/lib/libc.a" ]]
+        picoflash picoutil aes_test
     )
     # Add -Wall -Wextra
     target_compile_options(pwv_pico_side PRIVATE "-Wall" "-Wextra" "-Werror" "-ftrack-macro-expansion=0")
@@ -156,8 +169,6 @@ if (TARGET tinyusb_device)
 
     pico_enable_stdio_usb(pwv_pico_side 1)
     pico_enable_stdio_uart(pwv_pico_side 0)
-
-    #[[ pico_set_binary_type(pwv_pico_side copy_to_ram) ]]
 
     pico_add_extra_outputs(pwv_pico_side)
 elseif(PICO_ON_DEVICE)

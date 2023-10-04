@@ -16,6 +16,7 @@ __restore_macro(__always_inline)
 #include <hardware/clocks.h>
 #include <hardware/xosc.h>
 #include <hardware/pll.h>
+#include <hardware/structs/mpu.h>
 
 #include <stdint.h>
 #include <stddef.h>
@@ -177,6 +178,11 @@ void print_clocks(void)
 /* clk_adc: 48000000Hz */
 /* clk_rtc: 46875Hz */
 
+static void print_mpu_state(void)
+{
+    printf("mpu_hw->ctrl->enable: %s \n", (mpu_hw->ctrl & M0PLUS_MPU_CTRL_ENABLE_BITS) ? "true" : "false");
+}
+
 int main(void)
 {
     /* clocks_init(); */
@@ -315,7 +321,13 @@ int main(void)
         // picoutil_test_mix_columns();
         //picoutil_test_encryption_ecb_mode(13);
         // test_aes_encrypt_decrypt_ecb();
-        test_aes_encrypt_decrypt_cbc();
+        //test_aes_encrypt_decrypt_cbc();
+        //__zero_used_regs
+        //void test_aes_encrypt_decrypt_ecb_256_blocksize_192_keysize_no_reference(void);
+        //test_aes_encrypt_decrypt_ecb_256_blocksize_192_keysize_no_reference();
+        //__zero_used_regs
+        //void test_aes_encrypt_decrypt_cbc_192_blocksize_256_keysize_no_reference(void);
+        //test_aes_encrypt_decrypt_cbc_192_blocksize_256_keysize_no_reference();
 
         uint32_t a1 = UINT32_MAX / 2 - ((UINT32_MAX / 2) % 2 == 0 ? 0 : 1); 
         uint32_t b1 = 2;
@@ -325,6 +337,8 @@ int main(void)
 
         printf("%" PRIu32 " == %" PRIu32 "\n", __mul_instruction_unsigned(a1, b1), a1 * b1);
         printf("%" PRIi32 " == %" PRIi32 "\n", __mul_instruction_signed(a2, b2), a2 * b2);
+
+        print_mpu_state();
 
 #if 0
         picoutil_static_allocator_set_safe(true);

@@ -150,7 +150,11 @@
 #ifdef TYPEOF
     #undef TYPEOF
 #endif
-#define TYPEOF(EXPR) __typeof__(EXPR)
+#if PICOUTIL_HAS_C23
+    #define TYPEOF(EXPR) typeof_unqual(EXPR)
+#else
+    #define TYPEOF(EXPR) __typeof__(EXPR)
+#endif
 
 #ifdef IS_COMPTIME
     #undef IS_COMPTIME
@@ -289,8 +293,12 @@
 #ifndef __fmtfunc
     #define __fmtfunc(FUNCLIKE, FORMAT_INDEX, FIRST_TO_CHECK) ATTRIBUTE_WITH_PARAMS(format, PP_CAT(__, PP_CAT(FUNCLIKE, __)), FORMAT_INDEX, FIRST_TO_CHECK)
 #endif
-#ifndef __printflike
-    #define __printflike(FORMAT_INDEX, FIRST_TO_CHECK) __fmtfunc(printf, FORMAT_INDEX, FIRST_TO_CHECK)
+#ifdef __printflike
+    #undef __printflike
+#endif
+#define __printflike(FORMAT_INDEX, FIRST_TO_CHECK) __fmtfunc(printf, FORMAT_INDEX, FIRST_TO_CHECK)
+#ifndef __fmtarg
+    #define __fmtarg(FORMAT_INDEX, ...) ATTRIBUTE_WITH_PARAMS(format_arg, FORMAT_INDEX, ##__VA_ARGS__)
 #endif
 #ifndef __pure
     #define __pure ATTRIBUTE(pure)
@@ -2239,7 +2247,7 @@ END_DECLS
 
 BEGIN_DECLS
 
-typedef enum
+typedef enum : uint8_t
 {
     LOG_SUCCESS = 10,
     LOG_INFO = 50,
@@ -2250,8 +2258,14 @@ typedef enum
 } log_level;
 
 uint8_t picoutil_set_log_threshold(log_level threshold);
-void picoutil_log(log_level level, const char* format, ...) __printflike(2, 3);
-void picoutil_log_raw(const char* format, ...) __printflike(1, 2);
+__printflike(2, 3)
+void picoutil_log(log_level level, const char* format, ...);
+__printflike(1, 2)
+void picoutil_log_raw(const char* format, ...);
+
+bool picoutil_is_mpu_active(void);
+void picoutil_mpu_enable(void);
+void picoutil_mpu_disable(void);
 
 END_DECLS
 
