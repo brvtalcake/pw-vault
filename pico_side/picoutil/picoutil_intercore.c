@@ -123,8 +123,21 @@ static queue_t result_queue = { 0 };
 // This queue is only a sort of communication buffer from core 0 to core 1.
 static queue_t incoming_task_queue = { 0 };
 
+// Final results from core 1 will be put here, core 0 will read them.
+static queue_t core0_result_queue = { 0 };
+
 static struct core1_task running_task = { 0 };
 static bool core1_failed = false;
+
+static bool core1_ok = false;
+
+// To be used "internally" by the library (maybe could even be static)
+bool picoutil_core1_ok(void)
+{
+    bool old = core1_ok;
+    core1_ok = false;
+    return old;
+}
 
 void picoutil_fail_core1(void)
 {
@@ -163,16 +176,19 @@ static inline void prepare_core1(void)
 
     queue_init(&core1_task_queue, sizeof(core1_task_t), PICOUTIL_MAX_CORE1_TASKS);
     queue_init(&result_queue, sizeof(core1_result_t), (PICOUTIL_MAX_CORE1_TASKS) * 2);
+    queue_init(&core0_result_queue, sizeof(core1_result_t), (PICOUTIL_MAX_CORE1_TASKS) * 2);
     // Even though we only need 4 units, allocate a bit more just in case, so core 0 is less likely to block or trigger errors because of a full queue
     queue_init(&incoming_task_queue, sizeof(core1_task_units_t), 4 * 2);
 }
 
+__noreturn
 void picoutil_core1_entry(void)
 {
     if (get_core_num() != 1)
         picoutil_log(LOG_FATAL, "picoutil_core1_entry() should only be called from core 1");
     prepare_core1();
     // TODO: Not finished yet
+    __unreachable();
 }
 
 __interrupt
@@ -256,4 +272,123 @@ end:
         multicore_fifo_clear_irq();
     }
     picoutil_restore_interrupts(interrupt_state);
+}
+
+// TODO: Implement an interrupt handler for core 0 that would be triggered when core 1 receives an interrupt from its FIFO
+//       (i.e. after core 0 has sent something), and that would wait for core 1 to send a `PICOUTIL_INTERCORE_OK_MAGIC`
+//       signal before returning to normal state
+//       - It requires to handle potential "deadlocks"
+//       - Everytime core 0 sends signal to core 1, put a tight loop that checks for a global static variable `core1_ok` to be true
+//         (which would only be set to true after the previously mentioned interrupt handler receives a `PICOUTIL_INTERCORE_OK_MAGIC` signal,
+//         and which would be reset after the loop). This way we ensure that core 1 is "ok" and has treated signal from core 0.
+//       - The interrupt handler in core 0 should not wait for any signal from core 1 if it is triggered because of invalid push/pop in the FIFO
+//         (i.e. make sure to differentiate between those cases)
+//       - Make use of `__sev()`, `__wfe()` and `__wfi()` when possible, to avoid "tight loops"
+
+__interrupt
+// To be triggered when sending to core 1 and waiting for its "ok" response
+void picoutil_isr_intercore_fifo_core01(void)
+{
+    uint32_t interrupt_state = picoutil_disable_interrupts();
+    if (get_core_num() != 0)
+    {
+        picoutil_restore_interrupts(interrupt_state);
+        exit(EXIT_FAILURE);
+    }
+    uint32_t fifo_st = multicore_fifo_get_status(); // The previously mentioned "differentiation" is done here
+    if (fifo_st & SIO_FIFO_ST_WOF_BITS || fifo_st & SIO_FIFO_ST_ROE_BITS)
+    {
+        picoutil_log(LOG_ERROR, "A read occurred when the FIFO was empty, or a write occurred when the FIFO was full");
+        multicore_fifo_drain();
+        multicore_fifo_clear_irq();
+        picoutil_restore_interrupts(interrupt_state);
+        return;
+    }
+    uint32_t magic = 0;
+retry:
+    if (UNLIKELY(!multicore_fifo_pop_timeout_us(1000, &magic)))
+    {
+        picoutil_log(LOG_ERROR, "Timeout while waiting for core 1 to send a signal");
+        multicore_fifo_drain();
+        multicore_fifo_clear_irq();
+        picoutil_restore_interrupts(interrupt_state);
+        return;
+    }
+    if (magic != PICOUTIL_INTERCORE_OK_MAGIC)
+    {
+        picoutil_log(LOG_ERROR, "Invalid magic number in intercore FIFO: %x", magic);
+        goto retry;
+    }
+    switch (magic)
+    {
+        case PICOUTIL_INTERCORE_LOCKOUT_MAGIC_START: // Don't care
+            break;
+        case PICOUTIL_INTERCORE_LOCKOUT_MAGIC_END: // Don't care
+            break;
+        case PICOUTIL_INTERCORE_TASK_RDY_MAGIC: // Don't care
+            break;
+        case PICOUTIL_INTERCORE_RES_RDY_MAGIC: // Don't care
+#if 0
+            // A result from core 1 is ready to be treated
+            char buf[sizeof(core1_result_t)] = { 0 };
+            core1_result_t result = { 0 };
+            while (!queue_is_empty(&result_queue))
+            {
+                queue_remove_blocking(&result_queue, buf);
+                result = *reinterpret_cast(core1_result_t*, DECAY(buf));
+                // Since we empty the queue each time we get an interrupt, the queue is supposed to have only one result in it
+                if (!queue_is_empty(&result_queue))
+                    picoutil_log(LOG_FATAL, "The result queue is not supposed to have more than one result in it");
+            }
+            if (!result.ret_mem || !result.ret_size)
+                picoutil_log(LOG_FATAL, "A result is composed of 2 \"units\". Only %d provided", (result.ret_mem ? 1 : 0) + (result.ret_size ? 1 : 0));
+            // Add `result` to `core0_result_queue`
+            queue_add_blocking(&core0_result_queue, &result);
+            // We don't need to tell core 1 it's ok (we don't really care about this in core 1's context)
+            // And in fact, we SHOULDN'T do it AT ALL, since it would trigger this interrupt handler again, and we don't want that
+#endif
+            // Commented out because it is actually the code for `picoutil_isr_intercore_fifo_core00()` (the ISR to be triggered when core 0 receives a result from core 1)
+            break;
+        case PICOUTIL_INTERCORE_OK_MAGIC:
+            core1_ok = true;
+            break;
+        default:
+            picoutil_log(LOG_ERROR, "Invalid magic number in intercore FIFO: %x", magic);
+            break;
+    }
+    if (multicore_fifo_rvalid())
+        multicore_fifo_drain();
+
+    picoutil_restore_interrupts(interrupt_state);
+}
+
+__flatten
+static inline void ensure_core1_ok(void)
+{
+    if (get_core_num() != 0)
+        exit(EXIT_FAILURE);
+    while (!picoutil_core1_ok())
+        tight_loop_contents(); // ... At least for now
+}
+
+void picoutil_async_exec(int (*func)(void*), void* args, void* ret_buf, size_t ret_size)
+{
+    if (get_core_num() != 0)
+        exit(EXIT_FAILURE);
+    core1_task_units_t units[4] = { 0 };
+    units[0].tag = CORE1_TASK_FUNC;
+    units[0].payload.func = func;
+    units[1].tag = CORE1_TASK_ARGS;
+    units[1].payload.args = args;
+    units[2].tag = CORE1_TASK_RET_MEM;
+    units[2].payload.ret_mem = ret_buf;
+    units[3].tag = CORE1_TASK_RET_SIZE;
+    units[3].payload.ret_size = ret_size;
+    for (size_t i = 0; i < 4; ++i)
+        queue_add_blocking(&incoming_task_queue, &units[i]);
+    if (UNLIKELY(!multicore_fifo_wready()))
+        picoutil_log(LOG_FATAL, "Multicore FIFO is not ready to write when it should be");
+    multicore_fifo_push_blocking(PICOUTIL_INTERCORE_TASK_RDY_MAGIC);
+    __sev();
+    ensure_core1_ok();
 }
