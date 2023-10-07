@@ -139,8 +139,8 @@ add_compile_definitions("PICOUTIL_STATIC_BYTES_SIZE=(1024 * 2 * 2 * 2 * 2)")
 add_compile_options(-static)
 
 # Add `-mcpu='cortex-m0plus'` CFLAGS
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mcpu=cortex-m0plus")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcpu=cortex-m0plus")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mcpu=cortex-m0plus -mfp16-format=ieee")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mcpu=cortex-m0plus -mfp16-format=ieee")
 
 # Set build time (from `date` shell command if Linux, etc...), author and version variables
 exec_program(date ARGS "+%Y-%m-%d at %H:%M:%S" OUTPUT_VARIABLE BUILD_DATE)

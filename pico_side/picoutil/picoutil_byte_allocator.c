@@ -101,6 +101,7 @@ struct memory_header
     memory_header_t* prev;
     byte_t* data_start;
     bool free;
+    bool in_core1;
 };
 
 typedef struct memory_offset
@@ -189,6 +190,7 @@ void picoutil_static_allocator_init(bool safe)
     (*hdr).prev = NULL;
     (*hdr).data_start = offset.ptr + sizeof(memory_header_t);
     (*hdr).free = true;
+    (*hdr).in_core1 = false; // We don't care since it's not allocated yet
 #endif
     first_hdr_off = offset.offset;
     picoutil_static_bytes_initialized = true;
@@ -213,7 +215,8 @@ void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t re
                     .prev = hdr,
                     .data_start = 
                         (byte_t*)((uintptr_t)hdr->data_start + align_ptr(hdr->data_start, requested_align).offset + size) + align_ptr((byte_t*)((uintptr_t)hdr->data_start + align_ptr(hdr->data_start, requested_align).offset + size), alignof(memory_header_t)).offset + sizeof(memory_header_t),
-                    .free = true
+                    .free = true,
+                    .in_core1 = false // Still don't care
                 };
                 hdr->chnk_limits[1] = (byte_t*)((uintptr_t)hdr->data_start + align_ptr(hdr->data_start, requested_align).offset + size);
                 hdr->next = (memory_header_t*)(new_hdr.chnk_limits[0] + align_ptr(new_hdr.chnk_limits[0], alignof(memory_header_t)).offset);
@@ -222,6 +225,7 @@ void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t re
             }
             hdr->free = false;
             hdr->data_start += align_ptr(hdr->data_start, requested_align).offset;
+            hdr->in_core1 = (get_core_num() == 1);
             recursive_mutex_exit(&picoutil_static_bytes_mutex);
             picoutil_log(LOG_SUCCESS, "Allocated %zu bytes aligned to %zu at 0x%p", size, requested_align, hdr->data_start);
             return hdr->data_start;
@@ -352,7 +356,7 @@ void __time_critical_func(picoutil_static_free)(void* ptr)
     memory_header_t* hdr = (memory_header_t*)(picoutil_static_bytes + first_hdr_off);
     while (hdr)
     {
-        if (hdr->data_start == ptr || IS_IN_CHUNK(hdr, ptr))
+        if ((hdr->data_start == ptr || IS_IN_CHUNK(hdr, ptr)) && !hdr->free)
         {
             hdr->free = true;
             hdr->data_start = hdr->chnk_limits[0] + align_ptr(hdr->chnk_limits[0], alignof(memory_header_t)).offset + sizeof(memory_header_t);
@@ -396,6 +400,7 @@ void picoutil_static_allocator_dump_hdrs(void)
         printf("\tchunk size: %zu\n", CHNK_SZ(hdr));
         printf("\tdata_start: 0x%p (sizeof(memory_header_t) == %zu)", hdr->data_start, sizeof(memory_header_t));
         printf("\tdata room: %zu\n", DATA_ROOM(hdr));
+        printf("\tallocated from core %d\n", hdr->in_core1 ? 1 : 0);
         hdr = hdr->next;
     }
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
@@ -456,6 +461,42 @@ void __time_critical_func(picoutil_static_free_all)(void)
     (*hdr).data_start = offset.ptr + sizeof(memory_header_t);
     (*hdr).free = true;
     first_hdr_off = offset.offset;
+    recursive_mutex_exit(&picoutil_static_bytes_mutex);
+}
+
+__cold
+size_t picoutil_free_all_if(bool (*predicate)(void*))
+{
+    if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
+        return 0;
+    recursive_mutex_enter_blocking(&picoutil_static_bytes_mutex);
+    size_t freed = 0;
+    memory_header_t* hdr = (memory_header_t*)(picoutil_static_bytes + first_hdr_off);
+    while (hdr)
+    {
+        if (predicate(hdr->data_start))
+        {
+            picoutil_static_free(hdr->data_start);
+            freed++;
+        }
+        hdr = hdr->next;
+    }
+    recursive_mutex_exit(&picoutil_static_bytes_mutex);
+    return freed;
+}
+
+void picoutil_free_all_in_core(unsigned int corenum)
+{
+    if (!picoutil_static_bytes_initialized || !recursive_mutex_is_initialized(&picoutil_static_bytes_mutex))
+        return;
+    recursive_mutex_enter_blocking(&picoutil_static_bytes_mutex);
+    memory_header_t* hdr = (memory_header_t*)(picoutil_static_bytes + first_hdr_off);
+    while (hdr)
+    {
+        if (hdr->in_core1 == (BIT(corenum) == 1))
+            picoutil_static_free(hdr->data_start);
+        hdr = hdr->next;
+    }
     recursive_mutex_exit(&picoutil_static_bytes_mutex);
 }
 

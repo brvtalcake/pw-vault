@@ -60,23 +60,6 @@ struct picoflash_fs
     uint8_t version[5]; // "0.1.0" (for example)
 };
 
-static inline
-uint32_t picoflash_disable_interrupts(void)
-{
-    uint32_t ret = save_and_disable_interrupts();
-    picoutil_sync_barrier(BARRIER_DATA, BARRIER_SY);
-    picoutil_sync_barrier(BARRIER_INS, BARRIER_SY);
-    return ret;
-}
-
-static inline
-void picoflash_restore_interrupts(uint32_t state)
-{
-    picoutil_sync_barrier(BARRIER_DATA, BARRIER_SY);
-    picoutil_sync_barrier(BARRIER_INS, BARRIER_SY);
-    restore_interrupts(state);
-}
-
 bool picoflash_init(bool multicore, bool multithread);
 
 #if defined(PICOFLASH_SOURCE) && PICOFLASH_SOURCE

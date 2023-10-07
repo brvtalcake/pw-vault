@@ -112,7 +112,7 @@
     #define C_ATTRIBUTE(X)
     #define C_ATTRIBUTE_WITH_PARAMS(X, ...)
 #endif
-#if PICOUTIL_HAS_C23 /*&& 0 Some attributes don't work for some reasons (only work when written as `__attribute__((blah))` instead of `[[gnu::blah]]`) */
+#if PICOUTIL_HAS_C23
     #define GNU_ATTRIBUTE(X) [[__gnu__::PP_CAT(__, X, __)]]
     #define GNU_ATTRIBUTE_WITH_PARAMS(X, ...) [[__gnu__::PP_CAT(__, X, __)(__VA_ARGS__)]]
 #else
@@ -465,7 +465,9 @@
     #undef __bosdyn0
 #endif
 #define __bosdyn0(PTR) __builtin_dynamic_object_size((PTR), 0)
-
+#ifndef __compiler_membar
+    #define __compiler_membar() pico_default_asm_volatile ("" : : : "memory");
+#endif
 #ifndef __assume
     #define __assume(EXPR) ATTRIBUTE_WITH_PARAMS(assume, !!(EXPR))
 #endif
@@ -774,6 +776,14 @@
 #endif
 #define UNTUPLE(T) IDENTITY T
 
+#ifndef auto
+    #if PICOUTIL_HAS_C23
+        #define auto auto
+    #else
+        #define auto __auto_type
+    #endif
+#endif
+
 #ifdef PREPARE_INTERLEAVE_LOOP_MACRO
     #undef PREPARE_INTERLEAVE_LOOP_MACRO
 #endif
@@ -836,6 +846,20 @@ __restore_macro(__always_inline)
 
 #include <picoutil_fix_macros.h>
 
+#include <picoutil_stdtypes.h>
+
+typedef __fp16 float16_t;
+static_assert(sizeof(float16_t) == 2, "float16_t is not 2 bytes long");
+
+#if PICOUTIL_SIZEOF_FLOAT == 4U
+    typedef float float32_t;
+#elif PICOUTIL_SIZEOF_DOUBLE == 4U
+    typedef double float32_t;
+#elif PICOUTIL_SIZEOF_LONG_DOUBLE == 4U
+    typedef long double float32_t;
+#else
+    #error "No 32-bit floating point type available"
+#endif
 
 #ifdef intpow
     #undef intpow
@@ -913,6 +937,9 @@ __hot
 void      __time_critical_func(picoutil_static_free)(void* ptr);
 void      __time_critical_func(picoutil_static_free_all)(void);
 void      __time_critical_func(picoutil_static_free_all_except)(void** ptr, size_t count);
+__cold
+size_t picoutil_free_all_if(bool (*predicate)(void*));
+void picoutil_free_all_in_core(unsigned int corenum);
 
 uintptr_t picoutil_static_bytes_get_start_addr(void);
 uintptr_t picoutil_static_bytes_get_end_addr(void);
@@ -965,7 +992,7 @@ enum barrier_option : uint8_t
     ({                                                  \
         union                                           \
         {                                               \
-            __typeof__((VAR)) source;                   \
+            TYPEOF((VAR)) source;                       \
             TO dest;                                    \
         } PP_CAT(u, __LINE__) = { .source = (VAR) };    \
         (TO)(PP_CAT(u, __LINE__).dest);                 \
@@ -978,6 +1005,27 @@ static inline int picoutil_get_endian(void)
     static const int little = -1;
     static const int big = 1;
     return *(const char*)&num == 1 ? little : big;
+}
+
+__always_inline
+static inline uint32_t picoutil_disable_interrupts(void)
+{
+    __compiler_membar();
+    uint32_t ret = save_and_disable_interrupts();
+    picoutil_sync_barrier(BARRIER_DATA, BARRIER_SY);
+    picoutil_sync_barrier(BARRIER_INS, BARRIER_SY);
+    __compiler_membar();
+    return ret;
+}
+
+__always_inline
+static inline void picoutil_restore_interrupts(uint32_t state)
+{
+    __compiler_membar();
+    picoutil_sync_barrier(BARRIER_DATA, BARRIER_SY);
+    picoutil_sync_barrier(BARRIER_INS, BARRIER_SY);
+    restore_interrupts(state);
+    __compiler_membar();
 }
 
 #if 0
@@ -1384,71 +1432,6 @@ static inline void __time_critical_func(picoutil_sync_barrier)(enum barrier_targ
             break;
     }
 }
-
-
-#ifdef picoutil_atomic_op
-    #undef picoutil_atomic_op
-#endif
-#define picoutil_atomic_op(OP, ORDER)                                                                                                               \
-    {                                                                                                                                               \
-        switch (ORDER)                                                                                                                              \
-        {                                                                                                                                           \
-            case memory_order_relaxed:                                                                                                              \
-                /* Only atomicity is guaranteed */                                                                                                  \
-                /* Unsupported if the operation is not lock-free (a lock should be used instead) */                                                 \
-                OP;                                                                                                                                 \
-                break;                                                                                                                              \
-            case memory_order_consume:                                                                                                              \
-                /* no reads or writes in the current thread dependent on the value currently loaded can be reordered before this load */            \
-                /* writes to data-dependent variables in other threads that release the same atomic variable are visible in the current thread */   \
-                /* FIXME: maybe not appropriate */                                                                                                  \
-                goto PP_CAT(acq_rel, __LINE__);                                                                                                     \
-            case memory_order_acquire:                                                                                                              \
-                /* all writes in other threads that release the same atomic variable are visible in the current thread */                           \
-                __compiler_memory_barrier();                                                                                                        \
-                picoutil_sync_barrier(BARRIER_ALL, BARRIER_ST /* since releasing is a store */);                                                    \
-                __compiler_memory_barrier();                                                                                                        \
-                OP;                                                                                                                                 \
-                /* no reads or writes in the current thread can be reordered before this load */                                                    \
-                __compiler_memory_barrier();                                                                                                        \
-                break;                                                                                                                              \
-            case memory_order_release:                                                                                                              \
-                /* no reads or writes in the current thread can be reordered after this store */                                                    \
-                __compiler_memory_barrier();                                                                                                        \
-                OP;                                                                                                                                 \
-                __compiler_memory_barrier();                                                                                                        \
-                /* all writes in the current thread are visible in other threads that acquire the same atomic variable */                           \
-                /* and writes that carry a dependency into the atomic variable become visible in other threads that consume the same atomic */      \
-                picoutil_sync_barrier(BARRIER_ALL, BARRIER_SY);                                                                                     \
-                __compiler_memory_barrier();                                                                                                        \
-                break;                                                                                                                              \
-            case memory_order_acq_rel:                                                                                                              \
-PP_CAT(acq_rel, __LINE__):                                                                                                                          \
-                /* a read-modify-write operation with this memory order is both an acquire operation and a release operation */                     \
-                /* no memory reads or writes in the current thread can be reordered before the load, nor after the store */                         \
-                /* all writes in other threads that release the same atomic variable are visible before the modification */                         \
-                /* and the modification is visible in other threads that acquire the same atomic variable */                                        \
-                __compiler_memory_barrier();                                                                                                        \
-                picoutil_sync_barrier(BARRIER_ALL, BARRIER_SY);                                                                                     \
-                __compiler_memory_barrier();                                                                                                        \
-                OP;                                                                                                                                 \
-                __compiler_memory_barrier();                                                                                                        \
-                picoutil_sync_barrier(BARRIER_ALL, BARRIER_SY);                                                                                     \
-                __compiler_memory_barrier();                                                                                                        \
-                break;                                                                                                                              \
-            case memory_order_seq_cst:                                                                                                              \
-                __compiler_memory_barrier();                                                                                                        \
-                picoutil_sync_barrier(BARRIER_ALL, BARRIER_SY);                                                                                     \
-                __compiler_memory_barrier();                                                                                                        \
-                OP;                                                                                                                                 \
-                __compiler_memory_barrier();                                                                                                        \
-                picoutil_sync_barrier(BARRIER_ALL, BARRIER_SY);                                                                                     \
-                __compiler_memory_barrier();                                                                                                        \
-                break;                                                                                                                              \
-            default:                                                                                                                                \
-                break;                                                                                                                              \
-        }                                                                                                                                           \
-    }
 
 typedef enum
 {
