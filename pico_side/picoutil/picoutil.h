@@ -309,9 +309,11 @@
 #define __const ATTRIBUTE(const)
 #ifndef __noreturn
     #if HAS_C_ATTRIBUTE(noreturn)
-        #define __noreturn C_ATTRIBUTE(noreturn)
+        /* Defined directly like this to avoid potential `noreturn` macro substitution */
+        #define __noreturn [[__noreturn__]]
     #else
-        #define __noreturn ATTRIBUTE(noreturn)
+        /* Defined directly like this to avoid potential `noreturn` macro substitution */
+        #define __noreturn [[__gnu__::__noreturn__]]
     #endif
 #endif
 #ifndef __deprecated
@@ -417,10 +419,10 @@
     #undef __suppress_warning
 #endif
 #define __suppress_warning(WARNINGNAME) _Pragma(STRINGIFY(GCC diagnostic ignored STRCATIFY(-W, WARNINGNAME)));
-#ifdef __restore_warning
-    #undef __restore_warning
+#ifdef __restore_warnings
+    #undef __restore_warnings
 #endif
-#define __restore_warning __diag_pop
+#define __restore_warnings __diag_pop
 #ifdef __comp_log
     #undef __comp_log
 #endif
@@ -1007,27 +1009,6 @@ static inline int picoutil_get_endian(void)
     return *(const char*)&num == 1 ? little : big;
 }
 
-__always_inline
-static inline uint32_t picoutil_disable_interrupts(void)
-{
-    __compiler_membar();
-    uint32_t ret = save_and_disable_interrupts();
-    picoutil_sync_barrier(BARRIER_DATA, BARRIER_SY);
-    picoutil_sync_barrier(BARRIER_INS, BARRIER_SY);
-    __compiler_membar();
-    return ret;
-}
-
-__always_inline
-static inline void picoutil_restore_interrupts(uint32_t state)
-{
-    __compiler_membar();
-    picoutil_sync_barrier(BARRIER_DATA, BARRIER_SY);
-    picoutil_sync_barrier(BARRIER_INS, BARRIER_SY);
-    restore_interrupts(state);
-    __compiler_membar();
-}
-
 #if 0
 
 __artificial __always_inline
@@ -1376,7 +1357,7 @@ static inline void __time_critical_func(picoutil_sync_barrier)(enum barrier_targ
                 case 0:
                     break;
                 default:
-                    ATTRIBUTE(fallthrough);
+                    __fallthrough;
                 case BARRIER_SY:
                     pico_default_asm_volatile(
                         "dsb sy"
@@ -1425,12 +1406,31 @@ static inline void __time_critical_func(picoutil_sync_barrier)(enum barrier_targ
             );
             break;
         default:
-            ATTRIBUTE(fallthrough);
+            __fallthrough;
         case BARRIER_ALL:
             picoutil_sync_barrier(BARRIER_DATA, option);
             picoutil_sync_barrier(BARRIER_INS, option);
             break;
     }
+}
+
+__always_inline
+static inline uint32_t picoutil_disable_interrupts(void)
+{
+    __compiler_membar();
+    uint32_t ret = save_and_disable_interrupts();
+    picoutil_sync_barrier(BARRIER_ALL, BARRIER_SY);
+    __compiler_membar();
+    return ret;
+}
+
+__always_inline
+static inline void picoutil_restore_interrupts(uint32_t state)
+{
+    __compiler_membar();
+    picoutil_sync_barrier(BARRIER_ALL, BARRIER_SY);
+    restore_interrupts(state);
+    __compiler_membar();
 }
 
 typedef enum
@@ -2234,10 +2234,10 @@ typedef enum : uint8_t
 {
     LOG_SUCCESS = 10,
     LOG_INFO = 50,
-    LOG_DEBUG = 254, // High "threshold" because we always want to see debug logs
+    LOG_DEBUG = 75,
     LOG_WARNING = 100,
     LOG_ERROR = 200, 
-    LOG_FATAL = 255 // High "threshold" too for obvious reasons
+    LOG_FATAL = 255 // High "threshold" for obvious reasons
 } log_level;
 
 uint8_t picoutil_set_log_threshold(log_level threshold);
@@ -2250,7 +2250,103 @@ bool picoutil_is_mpu_active(void);
 void picoutil_mpu_enable(void);
 void picoutil_mpu_disable(void);
 
+
+typedef void (*picoutil_task_func_t)(void*);
+
+struct core1_task
+{
+    picoutil_task_func_t func;
+    void* args;
+    void* ret_mem;
+    size_t ret_size;
+
+    int exit_code;
+};
+typedef struct core1_task core1_task_t;
+
+struct core1_result
+{
+    void* ret_mem;
+    size_t ret_size;
+  
+    int exit_code;
+};
+typedef struct core1_result core1_result_t;
+
+struct core1_task_units
+{
+    enum
+    {
+        CORE1_TASK_FUNC,
+        CORE1_TASK_ARGS,
+        CORE1_TASK_RET_MEM,
+        CORE1_TASK_RET_SIZE
+    } tag;
+    union
+    {
+        picoutil_task_func_t func;
+        void* args;
+        void* ret_mem;
+        size_t ret_size;
+    } payload;
+};
+typedef struct core1_task_units core1_task_units_t;
+
+void picoutil_launch_core1(void);
+__noreturn
+void picoutil_return_to_core1(void* real_ret, int exit_code);
+__noreturn
+void picoutil_fail_core1(void);
+void picoutil_async_exec(picoutil_task_func_t func, void* args, void* ret_buf, size_t ret_size);
+bool picoutil_has_result(void);
+void picoutil_wait_result(void* ret_buf, size_t ret_size);
+
+bool picoutil_lockout_start(void);
+void picoutil_lockout_end(const volatile bool state);
+
+
+void picoutil_install_exception_handlers(void);
+
 END_DECLS
+
+#ifndef atomic_thread_fence
+    #define atomic_thread_fence(MODEL)                      \
+        picoutil_memory_barrier(BARRIER_SY);                \
+        picoutil_sync_barrier(BARRIER_ALL, BARRIER_SY);
+#endif
+
+#ifdef atomic_get
+    __save_macro(atomic_get)
+    #undef atomic_get
+#endif
+#define atomic_get(VAR) ({ atomic_thread_fence(memory_order_acquire); (VAR); })
+
+#ifdef APPLY
+    #undef APPLY
+#endif
+// A little bit of black magic from GCC and C23 here
+#define APPLY(FUNC, STACKSIZE, ...)                                                                     \
+    ({                                                                                                  \
+        int64_t UNIQUE(apply)(...)                                                                      \
+        {                                                                                               \
+            __builtin_return(__builtin_apply((void (*)())(FUNC), __builtin_apply_args(), (STACKSIZE))); \
+        }                                                                                               \
+        auto UNIQUE(ret) =  UNIQUE(apply)(__VA_ARGS__);                                                 \
+        UNIQUE(ret);                                                                                    \
+    })
+
+#ifdef APPLY_ARGS
+    #undef APPLY_ARGS
+#endif
+#define APPLY_ARGS(FUNC, STACKSIZE, ARGS)                                               \
+    ({                                                                                  \
+        int64_t UNIQUE(apply)(void)                                                     \
+        {                                                                               \
+            __builtin_return(__builtin_apply((void (*)())(FUNC), (ARGS), (STACKSIZE))); \
+        }                                                                               \
+        auto UNIQUE(ret) =  UNIQUE(apply)();                                            \
+        UNIQUE(ret);                                                                    \
+    })
 
 #endif
 

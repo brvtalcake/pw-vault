@@ -183,10 +183,20 @@ static void print_mpu_state(void)
     printf("mpu_hw->ctrl->enable: %s \n", (mpu_hw->ctrl & M0PLUS_MPU_CTRL_ENABLE_BITS) ? "true" : "false");
 }
 
+void test_func_core1(void* arg)
+{
+    (void)arg;
+    printf("Hello from core %u\n", get_core_num());
+    picoutil_return_to_core1(NULL, 0);
+}
+
 int main(void)
 {
     /* clocks_init(); */
     stdio_init_all();
+    picoutil_install_exception_handlers();
+    picoutil_set_log_threshold(LOG_SUCCESS);
+    picoutil_launch_core1();
     /* set_sysclock_to_xosc(48 * MHZ); */
     picoutil_static_allocator_init(true);
     uint32_t i = 1;
@@ -198,6 +208,13 @@ int main(void)
     gpio_set_dir(LED_PIN, GPIO_OUT);
     gpio_put(LED_PIN, 1);
 #endif
+    __unused
+    void lambda(void* arg)
+    {
+        (void)arg;
+        printf("Hello from core %u\n", get_core_num());
+        picoutil_return_to_core1(NULL, 0);
+    }
     while (true)
     {
         char c = getchar();
@@ -339,6 +356,11 @@ int main(void)
         printf("%" PRIi32 " == %" PRIi32 "\n", __mul_instruction_signed(a2, b2), a2 * b2);
 
         print_mpu_state();
+
+        fprintf(stderr, "Launching a new task\n");
+        picoutil_async_exec(&test_func_core1, NULL, NULL, 0);
+        fprintf(stderr, "A new task has been launched\n");
+        picoutil_wait_result(NULL, 0);
 
 #if 0
         picoutil_static_allocator_set_safe(true);

@@ -2,7 +2,7 @@
     "configurations": [
         {
             "name": "Raspi-pico",
-            "compilerPath": "/toolchains/raspi/pico_monolib/bin/pico-gcc",
+            "compilerPath": "/toolchains/raspi/pico/bin/pico-gcc",
             "compilerArgs": ["-mcpu=cortex-m0plus", "-std=gnu2x", "-D_GNU_SOURCE=1"],
             "includePath": [
                 "${workspaceFolder}/**",

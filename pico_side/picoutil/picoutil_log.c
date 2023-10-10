@@ -96,12 +96,19 @@ void picoutil_log(log_level level, const char* format, ...)
     printf(RESET);
     log_va_list(format, args);
     va_end(args);
+    // Flush stdout
+    fflush(stdout);
     if (level == LOG_FATAL)
+    {
+        // Wait for the flush to complete
+        busy_wait_us(1000);
+        // Reset USB boot
 #if defined(PICO_ENTER_USB_BOOT_ON_EXIT) && PICO_ENTER_USB_BOOT_ON_EXIT
         exit(EXIT_FAILURE);
 #else
         reset_usb_boot(0, 0);
 #endif
+    }
 }
 
 __printflike(1, 2)
