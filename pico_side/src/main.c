@@ -208,13 +208,7 @@ int main(void)
     gpio_set_dir(LED_PIN, GPIO_OUT);
     gpio_put(LED_PIN, 1);
 #endif
-    __unused
-    void lambda(void* arg)
-    {
-        (void)arg;
-        printf("Hello from core %u\n", get_core_num());
-        picoutil_return_to_core1(NULL, 0);
-    }
+    uint64_t count = 0;
     while (true)
     {
         char c = getchar();
@@ -357,10 +351,18 @@ int main(void)
 
         print_mpu_state();
 
-        fprintf(stderr, "Launching a new task\n");
-        picoutil_async_exec(&test_func_core1, NULL, NULL, 0);
-        fprintf(stderr, "A new task has been launched\n");
+        __unused
+        void lambda(void* arg)
+        {
+            (void)arg;
+            picoutil_log(LOG_SUCCESS, "Hello from core %u in loop iteration number %" PRIu64 "\n", get_core_num(), count);
+            picoutil_return_to_core1(NULL, 0);
+        }
+
+        picoutil_async_exec(&lambda, NULL, NULL, 0);
         picoutil_wait_result(NULL, 0);
+
+        ++count;
 
 #if 0
         picoutil_static_allocator_set_safe(true);

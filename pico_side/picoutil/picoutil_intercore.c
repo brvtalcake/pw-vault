@@ -137,7 +137,8 @@ static void picoutil_isr_intercore_fifo_core0(void);
 static bool picoutil_core1_ok(void)
 {
     bool old = core1_ok;
-    core1_ok = false;
+    if (old)
+        core1_ok = false;
     return old;
 }
 
@@ -208,9 +209,7 @@ static inline void prepare_core0(void)
 
     multicore_fifo_clear_irq();
     multicore_fifo_drain();
-    picoutil_log(LOG_SUCCESS, "prepare_core0(): Cleared intercore FIFO IRQ");
     install_fifo_isr_core0();
-    picoutil_log(LOG_SUCCESS, "prepare_core0(): Installed intercore FIFO ISRs");
 
     // Queue for core 0 only (could be in `.scratch_x`)
     queue_init(&core0_result_queue, sizeof(core1_result_t), (PICOUTIL_MAX_CORE1_TASKS) * 2);
@@ -251,7 +250,7 @@ static void picoutil_core1_entry(void)
     while (true)
     {
         while (queue_is_empty(&core1_task_queue))
-            __wfe();
+            __wfi();
 
         char buf[sizeof(core1_task_t)] = { 0 };
         queue_remove_blocking(&core1_task_queue, buf);
@@ -271,7 +270,6 @@ static void picoutil_core1_entry(void)
             default:
                 // Everything is ok
                 // Push a result in the result queue or wait if core 0 is not ready
-                picoutil_log(LOG_DEBUG, "Core 1 finished a task");
 
                 core1_result_t result = { 0 };
                 result.ret_mem = running_task.ret_mem;
@@ -292,11 +290,11 @@ static void picoutil_core1_entry(void)
                         break;
                     mutex_exit(&core0_state_mutex);
                 }
-                mutex_exit(&core0_state_mutex);
 
                 if (UNLIKELY(!multicore_fifo_wready()))
                     picoutil_log(LOG_FATAL, "Multicore FIFO is not ready to write");
                 multicore_fifo_push_blocking(PICOUTIL_INTERCORE_RES_RDY_MAGIC);
+                mutex_exit(&core0_state_mutex);
                 __sev();
                 break;
         }        
@@ -325,10 +323,7 @@ void picoutil_launch_core1(void)
 __interrupt
 static void picoutil_isr_intercore_fifo_core1(void)
 {
-    if (get_core_num() != 1)
-    {
-        ASSERT_IN_CORE(1);
-    }
+    ASSERT_IN_CORE(1);
 
     if (UNLIKELY(!mutex_is_initialized(&core1_state_mutex)))
         mutex_init(&core1_state_mutex);
@@ -411,7 +406,21 @@ static void picoutil_isr_intercore_fifo_core1(void)
                 }
                 // Add `task` to `core1_task_queue`
                 queue_add_blocking(&core1_task_queue, &task);
+                uint32_t out;
+                while (true)
+                {
+                    while (!mutex_try_enter(&core0_state_mutex, &out))
+                    {
+                        if (out == 1)
+                            picoutil_log(LOG_FATAL, "Core 1 is already owning a mutex it should not own at this point");
+                        tight_loop_contents();
+                    }
+                    if (!core0_in_isr)
+                        break;
+                    mutex_exit(&core0_state_mutex);
+                }
                 multicore_fifo_push_blocking(PICOUTIL_INTERCORE_OK_MAGIC); // We received everything 5/5
+                mutex_exit(&core0_state_mutex);
                 __sev();
                 break;
             case PICOUTIL_INTERCORE_RES_RDY_MAGIC:
@@ -437,10 +446,7 @@ static void picoutil_isr_intercore_fifo_core1(void)
 __interrupt
 static void picoutil_isr_intercore_fifo_core0(void)
 {
-    if (get_core_num() != 0)
-    {
-        ASSERT_IN_CORE(0);
-    }
+    ASSERT_IN_CORE(0);
 
     if (UNLIKELY(!mutex_is_initialized(&core0_state_mutex)))
         mutex_init(&core0_state_mutex);
@@ -510,15 +516,15 @@ void picoutil_async_exec(picoutil_task_func_t func, void* args, void* ret_buf, s
     ASSERT_IN_CORE(0);
     
     if (UNLIKELY(!func))
-        picoutil_log(LOG_FATAL, "Invalid function pointer");
+    {
+        picoutil_log(LOG_ERROR, "Invalid function pointer");
+        return;
+    }
 
-    picoutil_log(LOG_INFO, "Sending task to core 1...");
     if (!core0_initialized)
         prepare_core0();
-    picoutil_log(LOG_INFO, "Core 0 is ready");
     if (!core1_launched)
         picoutil_launch_core1();
-    picoutil_log(LOG_INFO, "Core 1 is ready");
     
     core1_task_units_t units[4] = { 0 };
     units[0].tag = CORE1_TASK_FUNC;
@@ -532,8 +538,6 @@ void picoutil_async_exec(picoutil_task_func_t func, void* args, void* ret_buf, s
     
     for (size_t i = 0; i < 4; ++i)
         queue_add_blocking(&incoming_task_queue, &units[i]);
-
-    picoutil_log(LOG_DEBUG, "Sent task to core 1");
     
     uint32_t out;
     while (true)
@@ -548,11 +552,11 @@ void picoutil_async_exec(picoutil_task_func_t func, void* args, void* ret_buf, s
             break;
         mutex_exit(&core1_state_mutex);
     }
-    mutex_exit(&core1_state_mutex);
 
     if (UNLIKELY(!multicore_fifo_wready()))
         picoutil_log(LOG_FATAL, "Multicore FIFO is not ready to write when it should be");
     multicore_fifo_push_blocking(PICOUTIL_INTERCORE_TASK_RDY_MAGIC);
+    mutex_exit(&core1_state_mutex);
     
     __sev();
     ensure_core1_ok();
@@ -567,6 +571,7 @@ bool picoutil_has_result(void)
 void picoutil_wait_result(void* ret_buf, size_t ret_size)
 {
     ASSERT_IN_CORE(0);
+    picoutil_log(LOG_DEBUG, "Waiting for result");
     while (queue_is_empty(&core0_result_queue))
         __wfi();
     char buf[sizeof(core1_result_t)] = { 0 };

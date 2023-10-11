@@ -94,6 +94,7 @@ void picoutil_log(log_level level, const char* format, ...)
             break;
     }
     printf(RESET);
+    printf("(core %u)  ", get_core_num());
     log_va_list(format, args);
     va_end(args);
     // Flush stdout
