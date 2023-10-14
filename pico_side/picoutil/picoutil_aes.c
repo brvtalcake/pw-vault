@@ -26,7 +26,7 @@ typedef struct aes_user_data
     #undef GET_ROW
 #endif
 #define GET_ROW(BLOCK, ROW, OUTPUT)                                             \
-    picoutil_memset_explicit(OUTPUT, 0, sizeof(OUTPUT));                        \
+    memset(OUTPUT, 0, sizeof(OUTPUT));                                          \
     __extension__                                                               \
     ({                                                                          \
         byte_t temp[picoutil_aes_block_word_count((BLOCK).block_size)];         \
@@ -37,8 +37,6 @@ typedef struct aes_user_data
         memcpy((OUTPUT), temp, sizeof(OUTPUT));                                 \
     })
 
-/*     byte_t OUTPUT[picoutil_aes_block_word_count((BLOCK).block_size)];           \ */
-
 #ifdef SET_ROW
     #undef SET_ROW
 #endif
@@ -46,7 +44,7 @@ typedef struct aes_user_data
     __extension__                                                               \
     ({                                                                          \
         byte_t temp[picoutil_aes_block_word_count((BLOCK).block_size)];         \
-        picoutil_memset_explicit(temp, 0, sizeof(temp));                        \
+        memset(temp, 0, sizeof(temp));                                          \
         memcpy(temp, (INPUT), sizeof(temp));                                    \
         for ( int UNIQUE(i) = 0;                                                \
               UNIQUE(i) < picoutil_aes_block_word_count((BLOCK).block_size);    \
@@ -67,18 +65,6 @@ typedef struct aes_user_data
         memcpy((OUTPUT), temp, sizeof(aes_word_t));                             \
     })
 
-/*     byte_t OUTPUT[sizeof(aes_word_t)] = { 0 };                      \
-    __extension__                                                   \
-    ({                                                              \
-        byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
-        temp[0] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[0];         \
-        temp[1] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[1];         \
-        temp[2] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[2];         \
-        temp[3] = ((byte_t*)&((BLOCK).block[(COLUMN)]))[3];         \
-        memcpy((OUTPUT), temp, sizeof(aes_word_t));                 \
-    })
-
- */
 #ifdef SET_COLUMN
     #undef SET_COLUMN
 #endif
@@ -90,21 +76,6 @@ typedef struct aes_user_data
         for (size_t UNIQUE(i) = 0; UNIQUE(i) < sizeof(aes_word_t); ++UNIQUE(i)) \
             ((byte_t*)&((BLOCK).block[(COLUMN)]))[UNIQUE(i)] = temp[UNIQUE(i)]; \
     })
-
-/*     __extension__                                                   \
-    ({                                                              \
-        byte_t temp[sizeof(aes_word_t)] = { 0 };                    \
-        memcpy(temp, (INPUT), sizeof(aes_word_t));                  \
-        ((byte_t*)&((BLOCK).block[(COLUMN)]))[0] = temp[0];         \
-        ((byte_t*)&((BLOCK).block[(COLUMN)]))[1] = temp[1];         \
-        ((byte_t*)&((BLOCK).block[(COLUMN)]))[2] = temp[2];         \
-        ((byte_t*)&((BLOCK).block[(COLUMN)]))[3] = temp[3];         \
-    }) */
-
-void picoutil_aes_init(void)
-{
-    picoutil_static_allocator_init(true);
-}
 
 __const
 static byte_t aes_galois_table_1(byte_t a)
@@ -779,8 +750,6 @@ static inline size_t max_between(size_t a, size_t b)
 
 static aes_key_expanded_t aes_key_schedule(aes_key_t key, aes_block_size bsize)
 {
-    picoutil_static_allocator_set_safe(true);
-    
     const aes_word_t N = picoutil_aes_key_word_count(key.key_size);
     // In 32-bit words (aes_word_t)
     const aes_word_t BSIZE = picoutil_aes_block_word_count(bsize);
@@ -792,7 +761,7 @@ static aes_key_expanded_t aes_key_schedule(aes_key_t key, aes_block_size bsize)
     const size_t R = (size_t)R_ + 1;
 
     aes_word_t full_expanded_key[BSIZE * R];
-    picoutil_memset_explicit(full_expanded_key, 0, sizeof(full_expanded_key));
+    memset(full_expanded_key, 0, sizeof(full_expanded_key));
 
     for (size_t i = 0; i < BSIZE * R; ++i)
     {
@@ -1061,9 +1030,10 @@ static inline aes_block_t aes_add_iv(aes_block_t block, aes_block_t iv)
     return block;
 }
 
-static inline aes_block_t aes_prepare_entry(byte_t* entry, aes_block_t block)
+__zero_used_regs
+static aes_block_t aes_prepare_entry(byte_t* entry, aes_block_t block)
 {
-    picoutil_memset_explicit(block.block, 0, sizeof(aes_word_t) * picoutil_aes_block_word_count(block.block_size));
+    memset(block.block, 0, sizeof(aes_word_t) * picoutil_aes_block_word_count(block.block_size));
     byte_t col1[sizeof(aes_word_t)] = { 0 };
     byte_t col2[sizeof(aes_word_t)] = { 0 };
     byte_t col3[sizeof(aes_word_t)] = { 0 };
@@ -1141,16 +1111,22 @@ bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size
 {
     if (key == NULL || buf == NULL || bufsize == 0)
         return false;
+    bool save = picoutil_static_allocator_set_safe(true);
     key->key_size = ksize;
     key->key = picoutil_static_calloc(picoutil_aes_key_word_count(ksize), sizeof(aes_word_t));
     if (key->key == NULL)
+    {
+        picoutil_static_allocator_set_safe(save);
         return false;
+    }
     if (!aes_prepare_key(buf, bufsize, ksize))
     {
         picoutil_static_free(key->key);
+        picoutil_static_allocator_set_safe(save);
         return false;
     }
     memcpy(key->key, buf, picoutil_aes_key_word_count(ksize) * sizeof(aes_word_t));
+    picoutil_static_allocator_set_safe(save);
     return true;
 }
 
@@ -1159,6 +1135,8 @@ bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir d
 {
     if (ctx == NULL)
         return false;
+
+    bool save = picoutil_static_allocator_set_safe(true);
 
     *ctx = NULL_T(aes_context_t);
 
@@ -1174,7 +1152,10 @@ bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir d
     {
         opt_key = *(aes_key_t*) opt_key_ptr;
         if (opt_key.key == NULL || opt_key.key_size != key_size)
+        {
+            picoutil_static_allocator_set_safe(save);
             return false;
+        }
     }
     else
         goto end_of_opt;
@@ -1182,7 +1163,10 @@ bool picoutil_aes_context_init_impl(aes_context_t* ctx, aes_mode mode, aes_dir d
     {
         opt_iv = *(aes_block_t*) opt_iv_ptr;
         if (opt_iv.block == NULL || opt_iv.block_size != block_size)
+        {
+            picoutil_static_allocator_set_safe(save);
             return false;
+        }
     }
     else
         goto end_of_opt;
@@ -1201,12 +1185,16 @@ end_of_opt:
     {
         ctx->key = picoutil_static_alloc_aligned(sizeof(aes_key_t), alignof(aes_key_t));
         if (ctx->key == NULL)
+        {
+            picoutil_static_allocator_set_safe(save);
             return false;
+        }
         ctx->key->key_size = key_size;
         ctx->key->key = picoutil_static_calloc_aligned(picoutil_aes_key_word_count(key_size), sizeof(aes_word_t), alignof(aes_word_t));
         if (ctx->key->key == NULL)
         {
             picoutil_static_free(ctx->key);
+            picoutil_static_allocator_set_safe(save);
             return false;
         }
         memcpy(ctx->key->key, opt_key.key, picoutil_aes_key_word_count(key_size) * sizeof(aes_word_t));
@@ -1235,6 +1223,7 @@ end_of_opt:
                 picoutil_static_free(ctx->key);
             }
             picoutil_static_free(ctx->iv);
+            picoutil_static_allocator_set_safe(save);
             return false;
         }
         memcpy(ctx->iv->block, opt_iv.block, picoutil_aes_block_word_count(block_size) * sizeof(aes_word_t));
@@ -1254,6 +1243,7 @@ end_of_opt:
             }
             picoutil_static_free(ctx->key->key);
             picoutil_static_free(ctx->key);
+            picoutil_static_allocator_set_safe(save);
             return false;
         }
         *ctx->key_expanded = aes_key_schedule(*ctx->key, ctx->block_size);
@@ -1268,11 +1258,13 @@ end_of_opt:
             picoutil_static_free(ctx->key->key);
             picoutil_static_free(ctx->key);
             picoutil_static_free(ctx->key_expanded);
+            picoutil_static_allocator_set_safe(save);
             return false;
         }
     }
     else
         ctx->key_expanded = NULL;
+    picoutil_static_allocator_set_safe(save);
     return true;
 }
 
@@ -1283,8 +1275,9 @@ void picoutil_aes_key_destroy(aes_key_t* key)
         return;
     if (key->key != NULL)
     {
-        picoutil_static_allocator_set_safe(true);
+        bool save = picoutil_static_allocator_set_safe(true);
         picoutil_static_free(key->key);
+        picoutil_static_allocator_set_safe(save);
     }
     *key = NULL_T(aes_key_t);
 }
@@ -1295,17 +1288,16 @@ static void aes_block_destroy(aes_block_t* block)
     if (block == NULL)
         return;
     if (block->block != NULL)
-    {
-        picoutil_static_allocator_set_safe(true);
         picoutil_static_free(block->block);
-    }
     *block = NULL_T(aes_block_t);
 }
 
 __zero_used_regs
 void picoutil_aes_iv_destroy(aes_block_t* iv)
 {
+    bool save = picoutil_static_allocator_set_safe(true);
     aes_block_destroy(iv);
+    picoutil_static_allocator_set_safe(save);
 }
 
 __zero_used_regs
@@ -1315,8 +1307,9 @@ void picoutil_aes_result_destroy(aes_result_t* result)
         return;
     if (result->data != NULL)
     {
-        picoutil_static_allocator_set_safe(true);
+        bool save = picoutil_static_allocator_set_safe(true);
         picoutil_static_free(result->data);
+        picoutil_static_allocator_set_safe(save);
     }
     *result = NULL_T(aes_result_t);
 }
@@ -1326,7 +1319,7 @@ void picoutil_aes_context_deinit(aes_context_t* ctx)
 {
     if (ctx == NULL)
         return;
-    picoutil_static_allocator_set_safe(true);
+    bool save = picoutil_static_allocator_set_safe(true);
     if (ctx->key != NULL)
     {
         if (ctx->key->key != NULL)
@@ -1345,6 +1338,7 @@ void picoutil_aes_context_deinit(aes_context_t* ctx)
         picoutil_static_free(ctx->key_expanded);
     }
     *ctx = NULL_T(aes_context_t);
+    picoutil_static_allocator_set_safe(save);
 }
 
 static void aes_free_user_data(aes_user_data_t data)
@@ -1447,6 +1441,8 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
     if (ctx == NULL || data == NULL || data_size == 0)
         return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
     
+    bool save = picoutil_static_allocator_set_safe(true);
+
     aes_key_t opt_key = { 0 };
     aes_block_t opt_iv = { 0 };
     aes_key_expanded_t actual_keys = NULL_T(aes_key_expanded_t);
@@ -1461,7 +1457,10 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
     {
         opt_key = *(aes_key_t*) opt_key_ptr;
         if (opt_key.key == NULL || opt_key.key_size != ctx->key_size)
+        {
+            picoutil_static_allocator_set_safe(save);
             return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+        }
     }
     else
         goto end_of_opt;
@@ -1469,7 +1468,10 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
     {
         opt_iv = *(aes_block_t*) opt_iv_ptr;
         if (opt_iv.block == NULL || opt_iv.block_size != ctx->block_size)
+        {
+            picoutil_static_allocator_set_safe(save);
             return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+        }
     }
     else
         goto end_of_opt;
@@ -1481,7 +1483,10 @@ end_of_opt:
         actual_keys = aes_key_schedule(opt_key, ctx->block_size);
         const aes_key_expanded_t null_keys = NULL_T(aes_key_expanded_t);
         if (memcmp(&actual_keys, &null_keys, sizeof(aes_key_expanded_t)) == 0)
+        {
+            picoutil_static_allocator_set_safe(save);
             return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+        }
     }
     else
         actual_keys = *ctx->key_expanded;
@@ -1492,7 +1497,12 @@ end_of_opt:
 
     aes_user_data_t user_data = aes_split_bytes(data, data_size, ctx->block_size);
     if (user_data.blocks == NULL)
+    {
+        if (opt_key_ptr != NULL)
+            aes_key_expanded_free(actual_keys);
+        picoutil_static_allocator_set_safe(save);
         return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
+    }
     aes_word_t* previous_encrypted_cbc_msg = NULL;
     aes_word_t* tmp_encrypted_cbc_msg = NULL;
     if (ctx->dir == AES_DIR_DECRYPT && ctx->mode == AES_MODE_CBC)
@@ -1503,6 +1513,7 @@ end_of_opt:
             aes_free_user_data(user_data);
             if (opt_key_ptr != NULL)
                 aes_key_expanded_free(actual_keys);
+            picoutil_static_allocator_set_safe(save);
             return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
         }
         tmp_encrypted_cbc_msg = picoutil_static_calloc_aligned(picoutil_aes_block_word_count(ctx->block_size), sizeof(aes_word_t), alignof(aes_word_t));
@@ -1512,6 +1523,7 @@ end_of_opt:
             if (opt_key_ptr != NULL)
                 aes_key_expanded_free(actual_keys);
             picoutil_static_free(previous_encrypted_cbc_msg);
+            picoutil_static_allocator_set_safe(save);
             return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
         }
     }
@@ -1567,6 +1579,7 @@ end_of_opt:
         aes_free_user_data(user_data);
         if (opt_key_ptr != NULL)
             aes_key_expanded_free(actual_keys);
+        picoutil_static_allocator_set_safe(save);
         return ({ aes_result_t result = NULL_T(aes_result_t); result.error = true; result; });
     }
     for (size_t i = 0; i < user_data.block_count; ++i)
@@ -1578,6 +1591,7 @@ end_of_opt:
     picoutil_static_free(user_data.blocks);
     if (opt_key_ptr != NULL) // i.e. if we allocated the key by calling aes_key_schedule
         aes_key_expanded_free(actual_keys);
+    picoutil_static_allocator_set_safe(save);
     return res;
 }
 
@@ -1586,6 +1600,8 @@ bool picoutil_aes_iv_init_impl(aes_block_t* iv, aes_block_size bsize, ...)
 {
     if (iv == NULL)
         return false;
+
+    bool save = picoutil_static_allocator_set_safe(true);
 
     *iv = NULL_T(aes_block_t);
 
@@ -1600,7 +1616,10 @@ bool picoutil_aes_iv_init_impl(aes_block_t* iv, aes_block_size bsize, ...)
         iv->block_size = bsize;
         iv->block = picoutil_static_calloc_aligned(picoutil_aes_block_word_count(bsize), sizeof(aes_word_t), alignof(aes_word_t));
         if (iv->block == NULL)
+        {
+            picoutil_static_allocator_set_safe(save);
             return false;
+        }
         memcpy(iv->block, iv_bytes, picoutil_aes_block_word_count(bsize) * sizeof(aes_word_t));
     }
     else
@@ -1608,11 +1627,15 @@ bool picoutil_aes_iv_init_impl(aes_block_t* iv, aes_block_size bsize, ...)
         iv->block_size = bsize;
         iv->block = picoutil_static_calloc_aligned(picoutil_aes_block_word_count(bsize), sizeof(aes_word_t), alignof(aes_word_t));
         if (iv->block == NULL)
+        {
+            picoutil_static_allocator_set_safe(save);
             return false;
+        }
         static_assert(sizeof(aes_word_t) * __CHAR_BIT__ == 32, "AES word size must be 32 bits");
         for (int i = 0; i < picoutil_aes_block_word_count(bsize); ++i)
             iv->block[i] = RAND(32);
     }
+    picoutil_static_allocator_set_safe(save);
     return true;
 }
 

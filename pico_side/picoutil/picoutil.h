@@ -483,7 +483,7 @@
     #define __compiler_membar() pico_default_asm_volatile ("" : : : "memory");
 #endif
 #ifndef __assume
-    #define __assume(EXPR) ATTRIBUTE_WITH_PARAMS(assume, !!(EXPR))
+    #define __assume(EXPR) ATTRIBUTE_WITH_PARAMS(assume, BIT(EXPR))
 #endif
 #ifndef __nonnull_params
     #define __nonnull_params(...) CHAOS_PP_EXPR(CHAOS_PP_SEQ_FOR_EACH(ATTRIBUTE_WITH_PARAMS_(nonnull, _1), TO_SEQ(__VA_ARGS__)))
@@ -1596,8 +1596,6 @@ typedef struct aes_result
     size_t data_size;
     bool error;
 } aes_result_t;
-
-void picoutil_aes_init(void);
 
 __zero_used_regs __wur
 bool picoutil_aes_key_init(aes_key_t* key, aes_key_size ksize, byte_t* buf, size_t bufsize);

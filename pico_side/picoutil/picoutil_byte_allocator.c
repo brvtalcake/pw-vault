@@ -145,8 +145,8 @@ static inline memory_offset_t align_ptr(void* ptr, size_t alignment)
 
 bool picoutil_static_allocator_set_safe(bool safe)
 {
-    bool old = picoutil_static_allocator_safe;
-    picoutil_static_allocator_safe = safe;
+    bool old = atomic_get(picoutil_static_allocator_safe); // TODO: Implement atomic_cas if no equivalent implemented by GCC
+    atomic_set(picoutil_static_allocator_safe, safe);
     return old;
 }
 
