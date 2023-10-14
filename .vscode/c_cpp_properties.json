@@ -83,7 +83,8 @@
                 "/opt/MCU_development/raspi/pico/pico-sdk/repo/lib/mbedtls/include",
                 "/opt/MCU_development/raspi/pico/pico-sdk/repo/lib/mbedtls/3rdparty/everest/include"
             ],
-            "defines": [],
+            "defines": ["PICO_USE_ORIGINAL_EXIT=1", "_FORTIFY_SOURCE=2", "PICO_ENTER_USB_BOOT_ON_EXIT=1", "PARAM_ASSERTIONS_ENABLE_ALL=1",
+                        "PICOUTIL_STATIC_BYTES_SIZE=(1024 * 2 * 2 * 2 * 2)", "PICO_USE_STACK_GUARDS=1", "PICO_LTO=1"],
             "cStandard": "c17",
             "cppStandard": "gnu++17"
         }

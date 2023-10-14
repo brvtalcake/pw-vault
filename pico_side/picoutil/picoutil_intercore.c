@@ -1,16 +1,14 @@
 #include <picoutil.h>
 
+// TODO: Restore more macros (all the ones used by Newlib and Raspi pico SDK)
 __restore_macro(__always_inline)
 
 // Put includes here
 #include <hardware/exception.h>
 #include <hardware/irq.h>
-#include <pico/bootrom.h>
-#include <pico/util/queue.h>
 #include <pico/multicore.h>
 #include <pico/sync.h>
 #include <pico/stdlib.h>
-#include <pico/time.h>
 
 #include <limits.h>
 #include <stdbool.h>
@@ -20,6 +18,7 @@ __restore_macro(__always_inline)
 #include <setjmp.h>
 #include <inttypes.h>
 #include <stdatomic.h>
+#include <stdio.h>
 
 #include <picoutil_fix_macros.h>
 
@@ -38,7 +37,7 @@ __restore_macro(__always_inline)
 #ifndef PICOUTIL_INTERCORE_OK_MAGIC
     #define PICOUTIL_INTERCORE_OK_MAGIC UINT32_C(0x0badface)
 #endif
-#ifndef PICOUTIL_INTERCORE_QUEUE_FULL_MAGIC
+#if/* ndef PICOUTIL_INTERCORE_QUEUE_FULL_MAGIC */ 0 // Ignore for now
     // When a task queue overflows
     #define PICOUTIL_INTERCORE_QUEUE_FULL_MAGIC UINT32_C(0x0badf00d)
 #endif
@@ -69,11 +68,64 @@ __restore_macro(__always_inline)
     #define PICOUTIL_CORE1_FAILURE INT_MIN
 #endif
 
+struct core1_task
+{
+    picoutil_task_func_t func;
+    void* args;
+    void* ret_mem;
+    size_t ret_size;
+
+    int exit_code;
+};
+typedef struct core1_task core1_task_t;
+
+struct core1_result
+{
+    void* ret_mem;
+    size_t ret_size;
+  
+    int exit_code;
+};
+typedef struct core1_result core1_result_t;
+
+struct core1_task_units
+{
+    enum
+    {
+        CORE1_TASK_FUNC,
+        CORE1_TASK_ARGS,
+        CORE1_TASK_RET_MEM,
+        CORE1_TASK_RET_SIZE
+    } tag;
+    union
+    {
+        picoutil_task_func_t func;
+        void* args;
+        void* ret_mem;
+        size_t ret_size;
+    } payload;
+};
+typedef struct core1_task_units core1_task_units_t;
+
 struct lockout_state
 {
     bool requested;
     bool granted;
 };
+
+typedef struct interqueue_node
+{
+    void* data;
+    bool used;
+} interqueue_node_t;
+
+// "intercore queue"
+typedef struct interqueue
+{
+    interqueue_node_t* nodes;
+    size_t elem_size;
+    size_t node_count;
+} interqueue_t;
 
 __suppress_warning(discarded-qualifiers)
 
@@ -91,33 +143,39 @@ static volatile bool core1_in_isr = false;
 auto_init_mutex(core1_state_mutex);
 
 // For use by core 1 only.
-// This is a `queue_t` of `struct core1_task`.
+// This is a `interqueue_t` of `struct core1_task`.
 // It may be needed to enqueue tasks in core 1 if one arrives before the previous one is finished, hence the necessity of this queue.
 // TODO: put it in `.scratch_y` ?
 #if 0
-static volatile queue_t core1_task_queue = { 0 } __scratch_y("core1_task_queue");
+__scratch_y("core1_task_queue")
+static interqueue_t core1_task_queue = { 0 };
 #else
-static volatile queue_t core1_task_queue = { 0 };
+static interqueue_t core1_task_queue = { 0 };
 #endif
+static volatile size_t core1_task_queue_size = PICOUTIL_MAX_CORE1_TASKS;
 
 // Core 1 will put results here, core 0 will read them.
-// This is a `queue_t` of `struct core1_result`.
+// This is a `interqueue_t` of `struct core1_result`.
 // As soon as core 1 finished sending a result in this queue, it has to seen a `PICOUTIL_INTERCORE_RES_RDY_MAGIC` signal in the intercore FIFO.
-static volatile queue_t result_queue = { 0 };
+static interqueue_t result_queue = { 0 };
+static volatile size_t result_queue_size = 2;
 
 // Core 0 will put tasks here, core 1 will read them.
-// This is a `queue_t` of `struct core1_task_units`.
+// This is a `interqueue_t` of `struct core1_task_units`.
 // As soon as core 0 finished sending a task in this queue, it has to seen a `PICOUTIL_INTERCORE_TASK_RDY_MAGIC` signal in the intercore FIFO.
 // This queue is only a sort of communication buffer from core 0 to core 1.
-static volatile queue_t incoming_task_queue = { 0 };
+static interqueue_t incoming_task_queue = { 0 };
+static volatile size_t incoming_task_queue_size = 4 * 2;
 
 // Final results from core 1 will be put here, core 0 will read them.
 // TODO: put it in `.scratch_x` ?
 #if 0
-static volatile queue_t core0_result_queue = { 0 } __scratch_x("core0_result_queue");
+__scratch_x("core0_result_queue")
+static interqueue_t core0_result_queue = { 0 };
 #else
-static volatile queue_t core0_result_queue = { 0 };
+static interqueue_t core0_result_queue = { 0 };
 #endif
+static volatile size_t core0_result_queue_size = PICOUTIL_MAX_CORE1_TASKS * 2;
 
 static volatile struct core1_task running_task = { 0 };
 
@@ -128,10 +186,125 @@ static volatile bool core0_initialized = false;
 
 static volatile jmp_buf core1_entry_jmp_buf = { 0 };
 
+// TODO: Make mutexes recursive mutexes (or maybe not ?)
+
+static void interqueue_init(interqueue_t* const q, const size_t elem_size, const size_t initial_node_count)
+{
+    hard_assert(q != NULL);
+    hard_assert(elem_size > 0);
+    hard_assert(initial_node_count > 0);
+
+    q->elem_size = elem_size;
+    q->node_count = initial_node_count;
+    q->nodes = NULL;
+    
+    q->nodes = calloc(q->node_count, sizeof(interqueue_node_t));
+    if (UNLIKELY(q->nodes == NULL))
+        picoutil_log(LOG_FATAL, "Could not allocate memory for interqueue nodes");
+    for (size_t i = 0; i < q->node_count; ++i)
+        q->nodes[i].used = false;
+
+    hard_assert(q->nodes != NULL);
+}
+
+static bool interqueue_empty(const interqueue_t* const q)
+{
+    hard_assert(q != NULL);
+
+    for (size_t i = 0; i < q->node_count; ++i)
+        if (q->nodes[i].used)
+            return false;
+    return true;
+}
+
+static bool interqueue_full(const interqueue_t* const q)
+{
+    hard_assert(q != NULL);
+
+    __vectorize_loop(1)
+    for (size_t i = 0; i < q->node_count; ++i)
+        if (!q->nodes[i].used)
+            return false;
+    return true;
+}
+
+static void interqueue_enqueue(interqueue_t* const q, void* data)
+{
+    hard_assert(q != NULL);
+    hard_assert(data != NULL);
+
+    if (UNLIKELY(interqueue_full(q)))
+    {
+        size_t old_count = q->node_count;
+        void* new_nodes = realloc(q->nodes, q->node_count * 2 * sizeof(interqueue_node_t));
+        if (UNLIKELY(new_nodes == NULL))
+            picoutil_log(LOG_FATAL, "Could not reallocate memory for interqueue nodes");
+        q->nodes = new_nodes;
+        for (size_t i = q->node_count; i < q->node_count * 2; ++i)
+            q->nodes[i].used = false;
+        q->node_count *= 2;
+        memset(q->nodes + old_count, 0, (q->node_count - old_count) * sizeof(interqueue_node_t));
+    }
+
+    for (size_t i = 0; i < q->node_count; ++i)
+    {
+        if (!q->nodes[i].used)
+        {
+            if (q->nodes[i].data != NULL)
+                picoutil_log(LOG_FATAL, "Interqueue node data is not NULL while node is not used");
+            q->nodes[i].data = malloc(q->elem_size);
+            if (UNLIKELY(q->nodes[i].data == NULL))
+                picoutil_log(LOG_FATAL, "Could not allocate memory for interqueue node data");
+            memmove(q->nodes[i].data, data, q->elem_size);
+            q->nodes[i].used = true;
+            return;
+        }
+
+        if (q->nodes[i].data == NULL)
+            picoutil_log(LOG_FATAL, "Interqueue node data is NULL while node is used");
+    }
+
+    __unreachable();
+}
+
+static void interqueue_dequeue(interqueue_t* const q, void* data)
+{
+    hard_assert(q != NULL);
+
+    if (UNLIKELY(interqueue_empty(q)))
+        picoutil_log(LOG_FATAL, "Interqueue is empty");
+
+    if (q->nodes[0].data == NULL)
+        picoutil_log(LOG_FATAL, "Interqueue head is NULL while node is used");
+    memmove(data, q->nodes[0].data, q->elem_size);
+    free(q->nodes[0].data);
+    memmove(q->nodes, q->nodes + 1, (q->node_count - 1) * sizeof(interqueue_node_t));
+    q->nodes[q->node_count - 1].used = false;
+    q->nodes[q->node_count - 1].data = NULL;
+}
+
+__cold
+static void interqueue_free(interqueue_t* const q)
+{
+    hard_assert(q != NULL);
+
+    if (q->nodes != NULL)
+    {
+        while (!interqueue_empty(q))
+            interqueue_dequeue(q, NULL);
+        free(q->nodes);
+        q->nodes = NULL;
+    }
+}
+
+#ifdef PICOUTIL_DEBUG
+    #include <picoutil/tests/test_intercore_queue.c>
+#endif
+
 __interrupt
-static void picoutil_isr_intercore_fifo_core1(void);
+static void __not_in_flash_func(picoutil_isr_intercore_fifo_core1)(void);
 __interrupt
-static void picoutil_isr_intercore_fifo_core0(void);
+static void __not_in_flash_func(picoutil_isr_intercore_fifo_core0)(void);
 
 // To be used "internally" by the library
 static bool picoutil_core1_ok(void)
@@ -170,16 +343,16 @@ static inline void process_result(void)
     ASSERT_IN_CORE(0);
     char buf[sizeof(core1_result_t)] = { 0 };
     core1_result_t result = { 0 };
-    while (!queue_is_empty(&result_queue))
+    while (!interqueue_empty(&result_queue))
     {
-        queue_remove_blocking(&result_queue, buf);
+        interqueue_dequeue(&result_queue, buf);
         result = *reinterpret_cast(core1_result_t*, DECAY(buf));
         // Since we empty the queue each time we get an interrupt, the queue is supposed to have only one result in it
-        if (!queue_is_empty(&result_queue))
+        if (!interqueue_empty(&result_queue))
             picoutil_log(LOG_FATAL, "The result queue is not supposed to have more than one result in it");
     }
     // Add `result` to `core0_result_queue`
-    queue_add_blocking(&core0_result_queue, &result);
+    interqueue_enqueue(&core0_result_queue, &result); // No more problem of full queue
 }
 
 static inline void install_fifo_isr_core1(void)
@@ -200,7 +373,23 @@ static inline void install_fifo_isr_core0(void)
     irq_set_priority(SIO_IRQ_PROC0, 0);
 }
 
-static inline void prepare_core0(void)
+static void free_intercore_queues_core0(void)
+{
+    ASSERT_IN_CORE(0);
+
+    interqueue_free(&core0_result_queue);
+    interqueue_free(&result_queue);
+    interqueue_free(&incoming_task_queue);
+}
+
+static void free_intercore_queues_core1(void)
+{
+    ASSERT_IN_CORE(1);
+
+    interqueue_free(&core1_task_queue);
+}
+
+static void prepare_core0(void)
 {
     ASSERT_IN_CORE(0);
 
@@ -212,14 +401,16 @@ static inline void prepare_core0(void)
     install_fifo_isr_core0();
 
     // Queue for core 0 only (could be in `.scratch_x`)
-    queue_init(&core0_result_queue, sizeof(core1_result_t), (PICOUTIL_MAX_CORE1_TASKS) * 2);
+    interqueue_init(&core0_result_queue, sizeof(core1_result_t), (PICOUTIL_MAX_CORE1_TASKS) * 2);
 
     // Queue for both cores
-    queue_init(&result_queue, sizeof(core1_result_t), 2); // One should be enough, but just in case
+    interqueue_init(&result_queue, sizeof(core1_result_t), 2); // One should be enough, but just in case
 
     // Queue for both cores
     // Even though we only need 4 units, allocate a bit more just in case, so core 0 is less likely to block or trigger errors because of a full queue
-    queue_init(&incoming_task_queue, sizeof(core1_task_units_t), 4 * 2);
+    interqueue_init(&incoming_task_queue, sizeof(core1_task_units_t), 4 * 2);
+
+    atexit(free_intercore_queues_core0);
 
     core0_initialized = true;
 }
@@ -233,11 +424,13 @@ static inline void prepare_core1(void)
     install_fifo_isr_core1();
     
     // Queue for core 1 only
-    queue_init(&core1_task_queue, sizeof(core1_task_t), PICOUTIL_MAX_CORE1_TASKS);
+    interqueue_init(&core1_task_queue, sizeof(core1_task_t), PICOUTIL_MAX_CORE1_TASKS);
+
+    atexit(free_intercore_queues_core1);
 }
 
 __noreturn
-static void picoutil_core1_entry(void)
+static void __time_critical_func(picoutil_core1_entry)(void)
 {
     ASSERT_IN_CORE(1);
 
@@ -249,11 +442,11 @@ static void picoutil_core1_entry(void)
 
     while (true)
     {
-        while (queue_is_empty(&core1_task_queue))
+        while (interqueue_empty(&core1_task_queue))
             __wfi();
 
         char buf[sizeof(core1_task_t)] = { 0 };
-        queue_remove_blocking(&core1_task_queue, buf);
+        interqueue_dequeue(&core1_task_queue, buf);
         running_task = *reinterpret_cast(core1_task_t*, DECAY(buf));
         if (UNLIKELY(!running_task.func))
             picoutil_log(LOG_FATAL, "Invalid function pointer");
@@ -271,12 +464,6 @@ static void picoutil_core1_entry(void)
                 // Everything is ok
                 // Push a result in the result queue or wait if core 0 is not ready
 
-                core1_result_t result = { 0 };
-                result.ret_mem = running_task.ret_mem;
-                result.ret_size = running_task.ret_size;
-                result.exit_code = running_task.exit_code;
-                queue_add_blocking(&result_queue, &result);
-
                 uint32_t out;
                 while (true)
                 {
@@ -291,10 +478,18 @@ static void picoutil_core1_entry(void)
                     mutex_exit(&core0_state_mutex);
                 }
 
+                core1_result_t result = { 0 };
+                result.ret_mem = running_task.ret_mem;
+                result.ret_size = running_task.ret_size;
+                result.exit_code = running_task.exit_code;
+                interqueue_enqueue(&result_queue, &result);
+
                 if (UNLIKELY(!multicore_fifo_wready()))
                     picoutil_log(LOG_FATAL, "Multicore FIFO is not ready to write");
                 multicore_fifo_push_blocking(PICOUTIL_INTERCORE_RES_RDY_MAGIC);
+                
                 mutex_exit(&core0_state_mutex);
+                
                 __sev();
                 break;
         }        
@@ -321,7 +516,7 @@ void picoutil_launch_core1(void)
 }
 
 __interrupt
-static void picoutil_isr_intercore_fifo_core1(void)
+static void __not_in_flash_func(picoutil_isr_intercore_fifo_core1)(void)
 {
     ASSERT_IN_CORE(1);
 
@@ -364,10 +559,10 @@ static void picoutil_isr_intercore_fifo_core1(void)
                 char buf[sizeof(core1_task_units_t)] = { 0 };
                 core1_task_t task = { 0 };
                 uint8_t count = 0;
-                while (!queue_is_empty(&incoming_task_queue))
+                while (!interqueue_empty(&incoming_task_queue))
                 {
                     bzero(buf, sizeof(buf));
-                    queue_remove_blocking(&incoming_task_queue, buf);
+                    interqueue_dequeue(&incoming_task_queue, buf);
                     core1_task_units_t unit = *reinterpret_cast(core1_task_units_t*, DECAY(buf));
                     switch (unit.tag)
                     {
@@ -393,7 +588,7 @@ static void picoutil_isr_intercore_fifo_core1(void)
                     }
                     // Since we empty the queue each time we get an interrupt, the queue is supposed to have only one task in it, so only 4 units
                     // Hence, if we have all 4 units but still have elems in the queue, that's an error
-                    if (count == 4 && !queue_is_empty(&incoming_task_queue))
+                    if (count == 4 && !interqueue_empty(&incoming_task_queue))
                     {
                         picoutil_restore_interrupts(interrupt_state);
                         picoutil_log(LOG_FATAL, "The incoming task queue is not supposed to have more than one task in it, or have more \"units\" than the 4 required ones");                    
@@ -405,7 +600,7 @@ static void picoutil_isr_intercore_fifo_core1(void)
                     picoutil_log(LOG_FATAL, "A task is composed of 4 \"units\". Only %d provided", (task.func ? 1 : 0) + (task.args ? 1 : 0) + (task.ret_mem ? 1 : 0) + (task.ret_size ? 1 : 0));
                 }
                 // Add `task` to `core1_task_queue`
-                queue_add_blocking(&core1_task_queue, &task);
+                interqueue_enqueue(&core1_task_queue, &task);
                 uint32_t out;
                 while (true)
                 {
@@ -444,7 +639,7 @@ static void picoutil_isr_intercore_fifo_core1(void)
 }
 
 __interrupt
-static void picoutil_isr_intercore_fifo_core0(void)
+static void __not_in_flash_func(picoutil_isr_intercore_fifo_core0)(void)
 {
     ASSERT_IN_CORE(0);
 
@@ -536,9 +731,6 @@ void picoutil_async_exec(picoutil_task_func_t func, void* args, void* ret_buf, s
     units[3].tag = CORE1_TASK_RET_SIZE;
     units[3].payload.ret_size = ret_size;
     
-    for (size_t i = 0; i < 4; ++i)
-        queue_add_blocking(&incoming_task_queue, &units[i]);
-    
     uint32_t out;
     while (true)
     {
@@ -553,6 +745,12 @@ void picoutil_async_exec(picoutil_task_func_t func, void* args, void* ret_buf, s
         mutex_exit(&core1_state_mutex);
     }
 
+    // Add in queue only where mutex acquired to avoid any unwanted concurrent access
+    interqueue_enqueue(&incoming_task_queue, &units[0]);
+    interqueue_enqueue(&incoming_task_queue, &units[1]);
+    interqueue_enqueue(&incoming_task_queue, &units[2]);
+    interqueue_enqueue(&incoming_task_queue, &units[3]);
+
     if (UNLIKELY(!multicore_fifo_wready()))
         picoutil_log(LOG_FATAL, "Multicore FIFO is not ready to write when it should be");
     multicore_fifo_push_blocking(PICOUTIL_INTERCORE_TASK_RDY_MAGIC);
@@ -565,22 +763,24 @@ void picoutil_async_exec(picoutil_task_func_t func, void* args, void* ret_buf, s
 bool picoutil_has_result(void)
 {
     ASSERT_IN_CORE(0);
-    return !queue_is_empty(&core0_result_queue);
+    return !interqueue_empty(&core0_result_queue);
 }
 
 void picoutil_wait_result(void* ret_buf, size_t ret_size)
 {
     ASSERT_IN_CORE(0);
-    picoutil_log(LOG_DEBUG, "Waiting for result");
-    while (queue_is_empty(&core0_result_queue))
+    while (interqueue_empty(&core0_result_queue))
         __wfi();
     char buf[sizeof(core1_result_t)] = { 0 };
-    queue_remove_blocking(&core0_result_queue, buf);
+    interqueue_dequeue(&core0_result_queue, buf);
     core1_result_t result = *reinterpret_cast(core1_result_t*, DECAY(buf));
-    if (result.ret_size > 0 && result.ret_mem != NULL && ret_buf != NULL)
-        memcpy(ret_buf, result.ret_mem, result.ret_size);
-    if (ret_size != result.ret_size)
+    if (ret_buf != NULL && ret_size != result.ret_size)
+    {
         picoutil_log(LOG_WARNING, "The size of the result buffer (%d) is different from the size of the result (%d)", ret_size, result.ret_size);
+        ret_size = MIN(ret_size, result.ret_size);
+    }
+    if (result.ret_size > 0 && result.ret_mem != NULL && ret_buf != NULL)
+        memmove(ret_buf, result.ret_mem, ret_size);
 }
 
 bool picoutil_lockout_start(void)
@@ -602,7 +802,7 @@ bool picoutil_lockout_start(void)
     while (!atomic_get(lockout_state.granted))
         __wfe();
 
-    uint32_t magic;
+    uint32_t magic = 0;
     // Verify that core 1 has effectively answered
     while (multicore_fifo_rvalid())
     {

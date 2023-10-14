@@ -62,7 +62,7 @@
     #error "NULL_T is already defined"
     #undef NULL_T
 #endif
-#define NULL_T(TYPE) ((TYPE){ 0 })
+#define NULL_T(STRUCT) ((STRUCT){ 0 })
 
 #ifdef UNIQUE
     #undef UNIQUE
@@ -447,6 +447,18 @@
     #undef __asm_name
 #endif
 #define __asm_name(NAME) __asm__(STRINGIFY(NAME))
+#ifdef __push_opt
+    #undef __push_opt
+#endif
+#define __push_opt(OPT) _Pragma(STRINGIFY(GCC push_options OPT))
+#ifdef __pop_opt
+    #undef __pop_opt
+#endif
+#define __pop_opt _Pragma("GCC pop_options")
+#ifdef __comp_opt
+    #undef __comp_opt
+#endif
+#define __comp_opt(OPT) ATTRIBUTE_WITH_PARAMS(optimize, OPT)
 
 #ifdef __bos
     #undef __bos
@@ -1215,7 +1227,6 @@ static inline bool __str32(uint32_t* const ptr, const uint32_t value)
     return true;
 }
 
-__artificial
 /**
  * @fn void picoutil_rand_fill(void* const ptr, const size_t size)
  * @brief Fills the memory chunk pointed to by `ptr` with random data
@@ -1663,15 +1674,10 @@ aes_result_t __time_critical_func(picoutil_aes_process_impl)(aes_context_t* ctx,
  */
 __zero_used_regs
 void picoutil_aes_result_destroy(aes_result_t* result);
-// aes_block_t __time_critical_func(picoutil_aes_encrypt_block)(aes_block_t block, aes_key_t key);
-// aes_block_t __time_critical_func(picoutil_aes_encrypt_block_until)(aes_block_t block, aes_key_t key, size_t num_round);
 
-__zero_used_regs
-void picoutil_test_encryption_ecb_mode(size_t num_rounds);
-__zero_used_regs
-void test_aes_encrypt_decrypt_ecb(void);
-__zero_used_regs
-void test_aes_encrypt_decrypt_cbc(void);
+#ifdef PICOUTIL_DEBUG
+    #include <picoutil/tests/tests.h>
+#endif
 
 END_DECLS
 
@@ -2253,45 +2259,6 @@ void picoutil_mpu_disable(void);
 
 typedef void (*picoutil_task_func_t)(void*);
 
-struct core1_task
-{
-    picoutil_task_func_t func;
-    void* args;
-    void* ret_mem;
-    size_t ret_size;
-
-    int exit_code;
-};
-typedef struct core1_task core1_task_t;
-
-struct core1_result
-{
-    void* ret_mem;
-    size_t ret_size;
-  
-    int exit_code;
-};
-typedef struct core1_result core1_result_t;
-
-struct core1_task_units
-{
-    enum
-    {
-        CORE1_TASK_FUNC,
-        CORE1_TASK_ARGS,
-        CORE1_TASK_RET_MEM,
-        CORE1_TASK_RET_SIZE
-    } tag;
-    union
-    {
-        picoutil_task_func_t func;
-        void* args;
-        void* ret_mem;
-        size_t ret_size;
-    } payload;
-};
-typedef struct core1_task_units core1_task_units_t;
-
 void picoutil_launch_core1(void);
 __noreturn
 void picoutil_return_to_core1(void* real_ret, int exit_code);
@@ -2320,6 +2287,12 @@ END_DECLS
     #undef atomic_get
 #endif
 #define atomic_get(VAR) ({ atomic_thread_fence(memory_order_acquire); (VAR); })
+
+#ifdef atomic_set
+    __save_macro(atomic_set)
+    #undef atomic_set
+#endif
+#define atomic_set(VAR, VAL) ({ (VAR) = (VAL); atomic_thread_fence(memory_order_release); })
 
 #ifdef APPLY
     #undef APPLY
@@ -2411,4 +2384,6 @@ __assume_aligned(ptr, 4, blah)
 
 __aligned_ret(4)
 __aligned_ret(4, blah, blah2)
+
+__comp_opt("fno-strict-aliasing")
 #endif

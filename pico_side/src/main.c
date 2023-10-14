@@ -9,6 +9,7 @@ __restore_macro(__always_inline)
 #include <pico.h>
 
 #include <pico/stdio.h>
+#include <pico/stdio/driver.h>
 #include <pico/stdlib.h>
 #include <pico/sync.h>
 #include <pico/bootrom.h>
@@ -27,6 +28,8 @@ __restore_macro(__always_inline)
 #include <math.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include <limits.h>
+#include <stdlib.h>
 
 #include <picoutil_fix_macros.h>
 #if 0
@@ -351,18 +354,25 @@ int main(void)
 
         print_mpu_state();
 
+        uint ret_buf = 0;
+
         __unused
-        void lambda(void* arg)
+        void nested(void* arg)
         {
             (void)arg;
+            uint real_ret = count;
             picoutil_log(LOG_SUCCESS, "Hello from core %u in loop iteration number %" PRIu64 "\n", get_core_num(), count);
-            picoutil_return_to_core1(NULL, 0);
+            picoutil_return_to_core1(&real_ret, 0);
         }
 
-        picoutil_async_exec(&lambda, NULL, NULL, 0);
+        picoutil_async_exec(&nested, NULL, &ret_buf, sizeof(uint));
         picoutil_wait_result(NULL, 0);
+        printf("Returned %u\n", ret_buf);
 
         ++count;
+
+        void test_interqueue(void);
+        test_interqueue();
 
 #if 0
         picoutil_static_allocator_set_safe(true);

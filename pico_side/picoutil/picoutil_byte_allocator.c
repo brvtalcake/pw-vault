@@ -130,7 +130,7 @@ static inline memory_offset_t align_ptr(void* ptr, size_t alignment)
     if (MODu32(alignment, 2) == 0)
     {
         void* aligned_ptr = (void*)(((uintptr_t)ptr + alignment - 1) & ~(alignment - 1));
-        assert((uintptr_t)aligned_ptr >= (uintptr_t)ptr);
+        hard_assert((uintptr_t)aligned_ptr >= (uintptr_t)ptr);
         return (memory_offset_t){aligned_ptr, (intptr_t)aligned_ptr - (intptr_t)ptr};
     }
     else
@@ -164,13 +164,13 @@ void picoutil_static_allocator_init(bool safe)
     if (picoutil_static_bytes_initialized)
         return;
     memory_offset_t offset = align_ptr(DECAY(picoutil_static_bytes), alignof(memory_header_t));
-    assert(offset.ptr != NULL);
+    hard_assert(offset.ptr != NULL);
     if (offset.ptr == NULL)
         picoutil_log(LOG_WARNING, "Failed to align pointer");
-    assert(offset.offset == 0); // Because we aligned it
+    hard_assert(offset.offset == 0); // Because we aligned it
     if (offset.offset != 0)
         picoutil_log(LOG_WARNING, "Misaligned static bytes (wrong offset)");
-    assert(check_alignment_requirements(offset.ptr, alignof(memory_header_t)));
+    hard_assert(check_alignment_requirements(offset.ptr, alignof(memory_header_t)));
     if (!check_alignment_requirements(offset.ptr, alignof(memory_header_t)))
         picoutil_log(LOG_WARNING, "Misaligned static bytes (wrong alignment)");
 #if 0
@@ -220,7 +220,7 @@ void* __time_critical_func(picoutil_static_alloc_aligned)(size_t size, size_t re
                 };
                 hdr->chnk_limits[1] = (byte_t*)((uintptr_t)hdr->data_start + align_ptr(hdr->data_start, requested_align).offset + size);
                 hdr->next = (memory_header_t*)(new_hdr.chnk_limits[0] + align_ptr(new_hdr.chnk_limits[0], alignof(memory_header_t)).offset);
-                assert(hdr->next != NULL && (uintptr_t) hdr->next % alignof(memory_header_t) == 0);
+                hard_assert(hdr->next != NULL && (uintptr_t) hdr->next % alignof(memory_header_t) == 0);
                 memcpy(hdr->next, &new_hdr, sizeof(memory_header_t));
             }
             hdr->free = false;
@@ -450,9 +450,9 @@ void __time_critical_func(picoutil_static_free_all)(void)
         picoutil_memset_explicit(picoutil_static_bytes, 0, PICOUTIL_STATIC_BYTES_SIZE);
     // Add the first `memory_header_t` to the static bytes
     memory_offset_t offset = align_ptr(DECAY(picoutil_static_bytes), alignof(memory_header_t));
-    assert(offset.ptr != NULL);
-    assert(offset.offset == 0); // Because we aligned it
-    assert(check_alignment_requirements(offset.ptr, alignof(memory_header_t)));
+    hard_assert(offset.ptr != NULL);
+    hard_assert(offset.offset == 0); // Because we aligned it
+    hard_assert(check_alignment_requirements(offset.ptr, alignof(memory_header_t)));
     memory_header_t* hdr = (memory_header_t*)offset.ptr;
     (*hdr).chnk_limits[0] = DECAY(picoutil_static_bytes);
     (*hdr).chnk_limits[1] = DECAY(picoutil_static_bytes) + PICOUTIL_STATIC_BYTES_SIZE;

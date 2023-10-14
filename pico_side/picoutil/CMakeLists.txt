@@ -52,7 +52,7 @@ configure_file(${PICOUTIL_STDTYPES_H_IN} ${PICOUTIL_STDTYPES_H} @ONLY)
 
 
 
-file(GLOB_RECURSE picoutil_SOURCES "*.h" "*.c" "*.hpp" "*.cpp" "*.s" "*.S")
+file(GLOB picoutil_SOURCES "*.h" "*.c" "*.hpp" "*.cpp" "*.s" "*.S")
 add_library(picoutil STATIC ${picoutil_SOURCES})
 #[[ configure_file(picoutil_version.h.in picoutil_version.h @ONLY) ]]
 
@@ -60,8 +60,10 @@ target_link_libraries(
     picoutil
     ${pico_all_modules}
 )
-target_include_directories(picoutil PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(picoutil PUBLIC ${CMAKE_CURRENT_LIST_DIR} "${CMAKE_CURRENT_LIST_DIR}/../")
 # Add -Wall -Wextra warnings
 target_compile_options(picoutil PRIVATE "-ftrack-macro-expansion=0")
 target_compile_options(picoutil PUBLIC "-Wall" "-Wextra" "-Werror")
+
+target_compile_definitions(picoutil PUBLIC "PICOUTIL_DEBUG")
 #[[ target_compile_definitions(picoutil PUBLIC _FORTIFY_SOURCE=2) ]]
