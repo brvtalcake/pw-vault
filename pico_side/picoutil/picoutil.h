@@ -427,22 +427,22 @@
     #undef __comp_log
 #endif
 #define __comp_log(MSG) _Pragma(STRINGIFY(GCC message MSG))
-#ifdef __vectorize_loop
-    #undef __vectorize_loop
+#ifdef __can_vectorize
+    #undef __can_vectorize
 #endif
-#define __vectorize_loop(BOOL) __vectorize_loop_PRIMITIVE(BOOL)
-#ifdef __vectorize_loop_PRIMITIVE
-    #undef __vectorize_loop_PRIMITIVE
+#define __can_vectorize(BOOL) __can_vectorize_PRIMITIVE(BOOL)
+#ifdef __can_vectorize_PRIMITIVE
+    #undef __can_vectorize_PRIMITIVE
 #endif
-#define __vectorize_loop_PRIMITIVE(TRUEORFALSE) PP_CAT(__vectorize_loop_, CHAOS_PP_BOOL(TRUEORFALSE))
-#ifdef __vectorize_loop_0
-    #undef __vectorize_loop_0
+#define __can_vectorize_PRIMITIVE(TRUEORFALSE) PP_CAT(__can_vectorize_, CHAOS_PP_BOOL(TRUEORFALSE))
+#ifdef __can_vectorize_0
+    #undef __can_vectorize_0
 #endif
-#define __vectorize_loop_0 _Pragma("GCC novector")
-#ifdef __vectorize_loop_1
-    #undef __vectorize_loop_1
+#define __can_vectorize_0 _Pragma("GCC novector")
+#ifdef __can_vectorize_1
+    #undef __can_vectorize_1
 #endif
-#define __vectorize_loop_1 _Pragma("GCC ivdep")
+#define __can_vectorize_1 _Pragma("GCC ivdep")
 #ifdef __asm_name
     #undef __asm_name
 #endif
@@ -1116,36 +1116,47 @@ static inline void picoutil_explicit_bzero(void* const ptr, const size_t size)
 /**
  * @fn bool picoutil_randbit(void)
  * @brief Returns a random bit
+ * 
+ * @param raw If `true`, the returned bit is directly coming from the ROSC's `RANDOM_BIT` register. Else, it comes from the SDK's `get_rand_64` function.
  */
-bool picoutil_randbit(void);
+bool picoutil_randbit(bool raw);
 /**
  * @fn uint8_t picoutil_rand8(void)
  * @brief Returns a random number with a width of 8 bits
+ * 
+ * @param raw If `true`, the returned number is directly coming from the ROSC's `RANDOMBIT` register. Else, it comes from the SDK's `get_rand_64` function. See also `picoutil_randbit`.
  */
-uint8_t picoutil_rand8(void);
+uint8_t picoutil_rand8(bool raw);
 /**
  * @fn uint16_t picoutil_rand16(void)
  * @brief Returns a random number with a width of 16 bits
+ * 
+ * @param raw If `true`, the returned number is directly coming from the ROSC's `RANDOMBIT` register. Else, it comes from the SDK's `get_rand_64` function. See also `picoutil_randbit`.
  */
-uint16_t picoutil_rand16(void);
+uint16_t picoutil_rand16(bool raw);
 /**
  * @fn uint32_t picoutil_rand32(void)
  * @brief Returns a random number with a width of 32 bits
+ * 
+ * @param raw If `true`, the returned number is directly coming from the ROSC's `RANDOMBIT` register. Else, it comes from the SDK's `get_rand_64` function. See also `picoutil_randbit`.
  */
-uint32_t picoutil_rand32(void);
+uint32_t picoutil_rand32(bool raw);
 /**
  * @fn uint64_t picoutil_rand64(void)
  * @brief Returns a random number with a width of 64 bits
+ * 
+ * @param raw If `true`, the returned number is directly coming from the ROSC's `RANDOMBIT` register. Else, it comes from the SDK's `get_rand_64` function. See also `picoutil_randbit`.
  */
-uint64_t picoutil_rand64(void);
+uint64_t picoutil_rand64(bool raw);
 /**
  * @fn uint64_t picoutil_randn(uint64_t n)
  * @brief Returns a random number with a width of `n` bits
  * 
- * @param n
- * @return uint64_t 
+ * @param n The width of the random number to return (max: 64 bits)
+ * @param raw If `true`, the returned number is directly coming from the ROSC's `RANDOMBIT` register. Else, it comes from the SDK's `get_rand_64` function. See also `picoutil_randbit`.
+ * @return A random number with a width of `n` bits
  */
-uint64_t picoutil_randn(uint64_t n);
+uint64_t picoutil_randn(uint8_t n, bool raw);
 
 #ifdef RAND
     #undef RAND
@@ -1250,7 +1261,7 @@ static inline bool picoutil_rand_fill(void* const ptr, const size_t size)
     while ((uintptr_t)ptr_ % 4 != 0)
     {
         byte_t* ptr_i = ptr_++;
-        register uint8_t val = picoutil_rand8();
+        register uint8_t val = picoutil_rand8(false);
 #if 0
         pico_default_asm_volatile(
             "strb %[reg], [%[ptr_i]]\n\t"
@@ -1266,7 +1277,7 @@ static inline bool picoutil_rand_fill(void* const ptr, const size_t size)
     for (i = (uintptr_t)ptr_; i < (uintptr_t)ptr + size - (size % 4); i += 4)
     {
         uint32_t* ptr_i = (uint32_t*)i;
-        register uint32_t val = picoutil_rand32();
+        register uint32_t val = picoutil_rand32(false);
 #if 0
         pico_default_asm_volatile(
             "str %[reg], [%[ptr_i]]\n\t"
@@ -1282,7 +1293,7 @@ static inline bool picoutil_rand_fill(void* const ptr, const size_t size)
     for (; i < (uintptr_t)ptr + size; i++)
     {
         byte_t* ptr_i = (byte_t*)i;
-        register uint8_t val = picoutil_rand8();
+        register uint8_t val = picoutil_rand8(false);
 #if 0
         pico_default_asm_volatile(
             "strb %[reg], [%[ptr_i]]\n\t"
@@ -2375,7 +2386,7 @@ __restore_macro(TEST_MAC1)
 TEST_MAC1 // 1
 #undef TEST_MAC1
 
-__vectorize_loop(1)
+__can_vectorize(1)
 
 __assume_aligned(ptr, 4)
 __assume_aligned(ptr, 4, blah)

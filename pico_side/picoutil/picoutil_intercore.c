@@ -221,7 +221,7 @@ static bool interqueue_full(const interqueue_t* const q)
 {
     hard_assert(q != NULL);
 
-    __vectorize_loop(1)
+    __can_vectorize(1)
     for (size_t i = 0; i < q->node_count; ++i)
         if (!q->nodes[i].used)
             return false;

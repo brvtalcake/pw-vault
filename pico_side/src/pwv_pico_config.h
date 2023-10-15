@@ -1,0 +1,50 @@
+
+
+#ifdef PARAM_ASSERTIONS_ENABLE_ALL
+	#undef PARAM_ASSERTIONS_ENABLE_ALL
+#endif
+#define PARAM_ASSERTIONS_ENABLE_ALL 1
+
+
+#ifdef PICO_USE_ORIGINAL_EXIT
+	#undef PICO_USE_ORIGINAL_EXIT
+#endif
+#define PICO_USE_ORIGINAL_EXIT 1
+
+
+#ifdef PICO_LTO
+	#undef PICO_LTO
+#endif
+#define PICO_LTO 1
+
+
+#ifdef PICO_USE_STACK_GUARDS
+	#undef PICO_USE_STACK_GUARDS
+#endif
+#define PICO_USE_STACK_GUARDS 1
+
+
+#ifdef PICO_ENTER_USB_BOOT_ON_EXIT
+	#undef PICO_ENTER_USB_BOOT_ON_EXIT
+#endif
+#define PICO_ENTER_USB_BOOT_ON_EXIT 1
+
+
+#ifdef _FORTIFY_SOURCE
+	#undef _FORTIFY_SOURCE
+#endif
+#define _FORTIFY_SOURCE 2
+
+
+#ifdef _GNU_SOURCE
+	#undef _GNU_SOURCE
+#endif
+#define _GNU_SOURCE 1
+
+
+#ifdef PICOUTIL_STATIC_BYTES_SIZE
+	#undef PICOUTIL_STATIC_BYTES_SIZE
+#endif
+#define PICOUTIL_STATIC_BYTES_SIZE (1024 * 2 * 2 * 2 * 2)
+
+

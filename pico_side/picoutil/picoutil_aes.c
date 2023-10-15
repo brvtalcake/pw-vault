@@ -16,6 +16,18 @@ __restore_macro(__always_inline)
 
 #include <picoutil_fix_macros.h>
 
+__uninitialized_ram("ctr_counter")
+static
+    /*
+     * TODO: Store the counter in EEPROM
+     */
+    struct {
+        uint64_t qword_high_high;
+        uint64_t qword_high_low;
+        uint64_t qword_low_high;
+        uint64_t qword_low_low;
+    } ctr_counter;
+
 typedef struct aes_user_data
 {
     aes_block_t* blocks;
@@ -1386,6 +1398,23 @@ static aes_user_data_t aes_split_bytes(byte_t* bytes, size_t bytes_count, aes_bl
     return data;
 }
 
+static inline uint64_t aes_get_nonce(uint8_t width)
+{
+    if (width == 8)
+        return picoutil_rand8(false);
+    else if (width == 16)
+        return picoutil_rand16(false);
+    else if (width == 32)
+        return picoutil_rand32(false);
+    else if (width == 64)
+        return picoutil_rand64(false);
+    else if (width <= 64)
+        return picoutil_randn(width, false);
+    else
+        picoutil_log(LOG_ERROR, "Invalid nonce width: %u", width);
+    return 0;
+}
+
 // TODO: Implement a multicore task runner and then make use of the second core (if available at the time of execution) to speed up the process
 static aes_block_t aes_encrypt_ecb(aes_block_t block, aes_key_expanded_t keys)
 {
@@ -1433,6 +1462,18 @@ static inline aes_block_t aes_decrypt_cbc(aes_block_t block, aes_key_expanded_t 
     aes_block_t temp = aes_decrypt_ecb(block, keys);
     temp = aes_add_iv(temp, *iv);
     return temp;
+}
+
+static aes_block_t aes_encrypt_ctr(aes_block_t block, aes_key_expanded_t keys, aes_block_t* iv, aes_block_t counter_block)
+{
+    assert(false && "TODO");
+    return NULL_T(aes_block_t);
+}
+
+static aes_block_t aes_decrypt_ctr(aes_block_t block, aes_key_expanded_t keys, aes_block_t* iv)
+{
+    assert(false && "TODO");
+    return NULL_T(aes_block_t);
 }
 
 __wur __sentinel __zero_used_regs
@@ -1633,7 +1674,7 @@ bool picoutil_aes_iv_init_impl(aes_block_t* iv, aes_block_size bsize, ...)
         }
         static_assert(sizeof(aes_word_t) * __CHAR_BIT__ == 32, "AES word size must be 32 bits");
         for (int i = 0; i < picoutil_aes_block_word_count(bsize); ++i)
-            iv->block[i] = RAND(32);
+            iv->block[i] = aes_get_nonce(32);
     }
     picoutil_static_allocator_set_safe(save);
     return true;

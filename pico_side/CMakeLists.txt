@@ -26,6 +26,11 @@ if (${IS_MAINTAINER_BUILD})
     set(PICO_TOOLCHAIN_PATH "/toolchains/raspi/pico")
 endif()
 
+set(
+    PICO_CONFIG_HEADER_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pwv_pico_config.h"
+)
+
 if (NOT(${CMAKE_GENERATOR} STREQUAL "Ninja Multi-Config"))
     if (NOT DEFINED CMAKE_BUILD_TYPE)
         set(CMAKE_BUILD_TYPE "Release")
@@ -122,8 +127,10 @@ set_property(GLOBAL PROPERTY CXX_STANDARD_REQUIRED ON)
 
 project(pw_vault C CXX ASM)
 
-add_compile_definitions("PARAM_ASSERTIONS_ENABLE_ALL=1")
-add_compile_definitions("PICO_USE_ORIGINAL_EXIT=1")
+#add_compile_definitions("PARAM_ASSERTIONS_ENABLE_ALL=1")
+set(PARAM_ASSERTIONS_ENABLE_ALL 1)
+#add_compile_definitions("PICO_USE_ORIGINAL_EXIT=1")
+set(PICO_USE_ORIGINAL_EXIT 1)
 add_compile_options("-masm-syntax-unified")
 
 # Ask for four configs: Debug, Release, RelWithDebInfo and MinSizeRel
@@ -137,7 +144,8 @@ if (ipo_supported)
     if (NOT(${CMAKE_GENERATOR} STREQUAL "Ninja Multi-Config") AND ${CMAKE_BUILD_TYPE} STREQUAL "Release")
         message(STATUS "IPO / LTO enabled for ${PROJECT_NAME}")
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
-        add_compile_definitions(PICO_LTO=1)
+        #add_compile_definitions("PICO_LTO=1")
+        set(PICO_LTO 1)
     elseif (${CMAKE_GENERATOR} STREQUAL "Ninja Multi-Config")
         # Enable LTO for Release builds only (not the three other configs)
         # Also, add the `PICO_LTO` macro definition only when LTO is enabled (i.e. only for Release builds)
@@ -146,10 +154,12 @@ if (ipo_supported)
         set_property(GLOBAL PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO FALSE)
         set_property(GLOBAL PROPERTY INTERPROCEDURAL_OPTIMIZATION_DEBUG FALSE)
         set_property(GLOBAL PROPERTY INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL FALSE)
-        add_compile_definitions("$<IF:$<CONFIG:Release>,PICO_LTO=1,PICO_LTO=0>")
+        #add_compile_definitions("$<IF:$<CONFIG:Release>,PICO_LTO=1,PICO_LTO=0>")
+        set(PICO_LTO "$<IF:$<CONFIG:Release>,1,0>")
     else()
         message(STATUS "IPO / LTO disabled for ${PROJECT_NAME}")
-        add_compile_definitions(PICO_LTO=0)
+        #add_compile_definitions("PICO_LTO=0")
+        set(PICO_LTO 0)
     endif()
 else()
     message(FATAL_ERROR "IPO / LTO not supported: <${ipo_supported_output}>")
@@ -193,12 +203,18 @@ add_compile_options("-fno-exceptions")
 #[[ add_compile_definitions(PICO_BOARD=${PICO_BOARD}) ]]
 add_compile_definitions("PICO_GCC_TRIPLE=${PICO_GCC_TRIPLE}")
 add_compile_definitions("PICO_PLATFORM=${PICO_PLATFORM}")
-add_compile_definitions("PICO_USE_STACK_GUARDS=1")
-add_compile_definitions("PICO_ENTER_USB_BOOT_ON_EXIT=1")
 
-add_compile_definitions("_FORTIFY_SOURCE=2")
-add_compile_definitions("_GNU_SOURCE=1")
-add_compile_definitions("PICOUTIL_STATIC_BYTES_SIZE=(1024 * 2 * 2 * 2 * 2)")
+#add_compile_definitions("PICO_USE_STACK_GUARDS=1")
+#add_compile_definitions("PICO_ENTER_USB_BOOT_ON_EXIT=1")
+set(PICO_USE_STACK_GUARDS 1)
+set(PICO_ENTER_USB_BOOT_ON_EXIT 1)
+
+#add_compile_definitions("_FORTIFY_SOURCE=2")
+#add_compile_definitions("_GNU_SOURCE=1")
+#add_compile_definitions("PICOUTIL_STATIC_BYTES_SIZE=(1024 * 2 * 2 * 2 * 2)")
+set(_FORTIFY_SOURCE 2)
+set(_GNU_SOURCE 1)
+set(PICOUTIL_STATIC_BYTES_SIZE "(1024 * 2 * 2 * 2 * 2)")
 
 add_compile_options(-static)
 
@@ -265,3 +281,39 @@ add_custom_target(
 )
 
 message(STATUS "Building for board: ${PICO_BOARD}, with build type: ${CMAKE_BUILD_TYPE}")
+
+set(
+    PICO_CONFIG_defs
+
+    PARAM_ASSERTIONS_ENABLE_ALL
+    PICO_USE_ORIGINAL_EXIT
+    PICO_LTO
+    PICO_USE_STACK_GUARDS
+    PICO_ENTER_USB_BOOT_ON_EXIT
+    _FORTIFY_SOURCE
+    _GNU_SOURCE
+    PICOUTIL_STATIC_BYTES_SIZE
+)
+
+set(additionalcfg_string "")
+foreach (picocfgdef ${PICO_CONFIG_defs})
+    if (DEFINED ${picocfgdef})
+        message(STATUS "Adding -D${picocfgdef}=${${picocfgdef}} to CFLAGS")
+        add_compile_options("-D${picocfgdef}=${${picocfgdef}}")
+    endif()
+    set(script_cmd_file "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/genhdrconfig.py")
+    set(script_cmd_args ${picocfgdef} "${${picocfgdef}}" true false)
+    message(STATUS "Running command: ${script_cmd_file} ${script_cmd_args}")
+    execute_process(COMMAND ${script_cmd_file} ${script_cmd_args} OUTPUT_VARIABLE script_output COMMAND_ERROR_IS_FATAL ANY)
+    string(APPEND additionalcfg_string ${script_output})
+endforeach()
+
+message(STATUS "Configuring additional config header file: ${CMAKE_CURRENT_SOURCE_DIR}/src/pwv_pico_config.h.in")
+
+message(STATUS "Executing command: ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/dumppreprocessor.py ${CMAKE_CURRENT_SOURCE_DIR}/src/pwv_pico_config.h.in ...(additionalcfg_string)...")
+
+execute_process(
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/dumppreprocessor.py" "${CMAKE_CURRENT_SOURCE_DIR}/src/pwv_pico_config.h.in" "${additionalcfg_string}"
+    COMMAND_ERROR_IS_FATAL ANY
+)
+

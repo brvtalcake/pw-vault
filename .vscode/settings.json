@@ -53,5 +53,6 @@
         "utility": "c",
         "cmath": "c",
         "cstdint": "c"
-    }
+    },
+    "cmake.sourceDirectory": "/home/axel/Documents/programmation/mcu/raspi/pico/pw-vault/pico_side"
 }
